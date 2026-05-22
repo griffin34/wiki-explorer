@@ -1,0 +1,11 @@
+{
+  "vaults": [
+    {
+      "id": "archive",
+      "name": "Archive",
+      "path": "/Users/jgriffin/dev/wiki-explorer/archive",
+      "color": "#89b4fa",
+      "createdAt": "2026-05-19"
+    }
+  ]
+}

@@ -1,0 +1,13 @@
+---
+description: Personal wiki conventions — apply to all files in this repo
+globs: ["**/*"]
+alwaysApply: true
+---
+
+# Personal Wiki — Agent Instructions (Cursor)
+
+The full wiki schema and all agent instructions live in `WIKI_SCHEMA.md` at the repo root.
+
+**Read `WIKI_SCHEMA.md` now before doing anything else in this repo.**
+
+This rule exists so Cursor finds its conventional entrypoint (`.cursor/rules/`). All content is in the schema file to keep a single source of truth.
