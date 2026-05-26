@@ -47,10 +47,12 @@ function getWiki(id: string): WikiConfig | undefined {
   return loadWikis().find((v) => v.id === id)
 }
 
+const SKIP_COPY = new Set(['.DS_Store', 'Thumbs.db', 'desktop.ini', 'ehthumbs.db'])
+
 function copyDirRecursive(src: string, dest: string): void {
   const entries = fs.readdirSync(src, { withFileTypes: true })
   for (const entry of entries) {
-    if (entry.name === '.DS_Store') continue
+    if (SKIP_COPY.has(entry.name)) continue
     const srcPath = path.join(src, entry.name)
     const destPath = path.join(dest, entry.name)
     if (entry.isDirectory()) {
@@ -140,7 +142,9 @@ function extractLinks(content: string): string[] {
 }
 
 function pageIdFromPath(filePath: string, v: WikiConfig): string {
-  return path.relative(wikiDir(v), filePath).replace(/\.md$/, '')
+  return path.relative(wikiDir(v), filePath)
+    .replace(/\.md$/, '')
+    .replace(/\\/g, '/')   // normalize Windows backslashes → forward slashes for URLs
 }
 
 // ─── Wiki Stats ───────────────────────────────────────────────────────────────
@@ -299,24 +303,25 @@ app.post('/api/open-in-ide', async (req, res) => {
 
   try {
     if (process.platform === 'darwin') {
-      // Try app bundle first, fall back to CLI
+      // Prefer app bundle via `open -a`; fall back to CLI on PATH
       const appExists = def.mac.apps.some((p) => fs.existsSync(p))
       if (appExists) {
         await execAsync(`open -a "${def.mac.macAppName}" "${folderPath}"`)
       } else {
-        await execAsync(`"${def.mac.cli}" "${folderPath}"`)
+        await execAsync(`${def.mac.cli} "${folderPath}"`)
       }
     } else if (process.platform === 'win32') {
-      // Try known exe paths first, then Toolbox, then CLI
+      // Prefer absolute exe path (quoted); fall back to bare CLI name on PATH
       const exePath = findWinExe(def.win.exes)
         ?? (def.win.toolboxPrefix ? findJetBrainsExe(def.win.toolboxPrefix, def.win.toolboxExe!) : null)
       if (exePath) {
         await execAsync(`"${exePath}" "${folderPath}"`)
       } else {
-        await execAsync(`"${def.win.cli}" "${folderPath}"`)
+        // Bare command name — do not wrap in quotes so cmd.exe can find it on PATH
+        await execAsync(`${def.win.cli} "${folderPath}"`)
       }
     } else {
-      await execAsync(`"${def.linux.cli}" "${folderPath}"`)
+      await execAsync(`${def.linux.cli} "${folderPath}"`)
     }
     res.json({ ok: true })
   } catch (err) {
@@ -336,13 +341,15 @@ app.get('/api/pick-folder', async (_req, res) => {
       )
       folderPath = stdout.trim().replace(/\/$/, '')
     } else if (process.platform === 'win32') {
-      const ps = [
-        '[System.Reflection.Assembly]::LoadWithPartialName("System.windows.forms") | Out-Null',
-        '$d = New-Object System.Windows.Forms.FolderBrowserDialog',
-        '$d.Description = "Select a folder for your wiki"',
-        'if ($d.ShowDialog() -eq "OK") { $d.SelectedPath }',
+      // Use -EncodedCommand to avoid cmd.exe quoting conflicts entirely
+      const psScript = [
+        'Add-Type -AssemblyName System.Windows.Forms',
+        "$d = New-Object System.Windows.Forms.FolderBrowserDialog",
+        "$d.Description = 'Select a folder for your wiki'",
+        "if ($d.ShowDialog() -eq 'OK') { Write-Output $d.SelectedPath }",
       ].join('; ')
-      const { stdout } = await execAsync(`powershell -Command "${ps}"`)
+      const encoded = Buffer.from(psScript, 'utf16le').toString('base64')
+      const { stdout } = await execAsync(`powershell -NoProfile -NonInteractive -EncodedCommand ${encoded}`)
       folderPath = stdout.trim()
     } else {
       // Linux fallback — try zenity, then kdialog
@@ -563,7 +570,12 @@ app.get('/api/wikis/:id/raw', (_req, res) => {
   const inboxExists = !!inbox && fs.existsSync(inbox)
   const files = getAllRawFiles(v).map((f) => {
     const stat = fs.statSync(f)
-    return { path: path.relative(raw ?? v.path, f), name: path.basename(f), size: stat.size, modified: stat.mtime.toISOString() }
+    return {
+      path: path.relative(raw ?? v.path, f).replace(/\\/g, '/'),
+      name: path.basename(f),
+      size: stat.size,
+      modified: stat.mtime.toISOString(),
+    }
   })
   res.json({ files, inboxExists })
 })
@@ -583,7 +595,7 @@ app.post('/api/wikis/:id/raw/upload', (req, res) => {
   multer({ storage: storageFor(inbox) }).array('files')(req, res, (err) => {
     if (err) return res.status(500).json({ error: String(err) })
     const files = (req.files as Express.Multer.File[]) || []
-    res.json({ uploaded: files.map((f) => ({ name: f.originalname, path: path.relative(raw, f.path), size: f.size })) })
+    res.json({ uploaded: files.map((f) => ({ name: f.originalname, path: path.relative(raw, f.path).replace(/\\/g, '/'), size: f.size })) })
   })
 })
 
@@ -644,19 +656,16 @@ function watchVaults() {
 
   if (!paths.length) return
 
+  // Normalise to forward slashes so matching works on Windows (chokidar
+  // emits forward-slash paths even on Windows, but stored paths may not).
+  const normFwd = (p: string) => p.replace(/\\/g, '/')
+  const findWiki = (f: string) =>
+    wikis.find((v) => normFwd(f).startsWith(normFwd(v.path)))
+
   chokidar.watch(paths, { ignoreInitial: true, awaitWriteFinish: { stabilityThreshold: 300 } })
-    .on('add', (f) => {
-      const wiki = wikis.find((v) => f.startsWith(v.path))
-      broadcast('file:add', { path: f, wikiId: wiki?.id })
-    })
-    .on('change', (f) => {
-      const wiki = wikis.find((v) => f.startsWith(v.path))
-      broadcast('file:change', { path: f, wikiId: wiki?.id })
-    })
-    .on('unlink', (f) => {
-      const wiki = wikis.find((v) => f.startsWith(v.path))
-      broadcast('file:remove', { path: f, wikiId: wiki?.id })
-    })
+    .on('add',    (f) => broadcast('file:add',    { path: f, wikiId: findWiki(f)?.id }))
+    .on('change', (f) => broadcast('file:change', { path: f, wikiId: findWiki(f)?.id }))
+    .on('unlink', (f) => broadcast('file:remove', { path: f, wikiId: findWiki(f)?.id }))
 }
 
 watchVaults()

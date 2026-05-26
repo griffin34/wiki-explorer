@@ -23,7 +23,7 @@ import type { IDEInfo } from '../hooks/useWiki'
 import { WIKI_DEFAULT_COLORS } from '../types'
 import type { WikiConfig } from '../types'
 import { useTheme } from '../ThemeContext'
-import { IDE_CREATE_COMMANDS } from './IDELaunchModal'
+import { IDE_CREATE_COMMANDS, writeToClipboard } from './IDELaunchModal'
 
 // ─── IDE Picker (shown after wiki creation) ───────────────────────────────────
 
@@ -58,14 +58,16 @@ function IDELaunchModalInline({ wikiPath }: { wikiPath: string }) {
   }, [])
 
   const handleOpen = async (ide: IDEInfo) => {
+    const command = IDE_CREATE_COMMANDS[ide.id] ?? '/create-wiki'
+    // Copy BEFORE opening the IDE — document must still be focused for clipboard access
+    await writeToClipboard(command)
+    setCopiedCommand(command)
+
     setLaunching(ide.id)
     setError(null)
     try {
       await openInIDE(ide.id, wikiPath)
       setLaunched(ide.id)
-      const command = IDE_CREATE_COMMANDS[ide.id] ?? '/create-wiki'
-      await navigator.clipboard.writeText(command)
-      setCopiedCommand(command)
     } catch (e) {
       setError(String(e))
     } finally {

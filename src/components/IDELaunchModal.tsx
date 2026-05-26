@@ -17,6 +17,23 @@ const IDE_COLORS: Record<string, string> = {
  * creation). Pass `fixedCommand` instead when all IDEs should receive the same
  * text (e.g. an ADD ingest prompt).
  */
+/** Write text to clipboard; falls back to the legacy execCommand approach. */
+export async function writeToClipboard(text: string): Promise<void> {
+  try {
+    await navigator.clipboard.writeText(text)
+  } catch {
+    const ta = document.createElement('textarea')
+    ta.value = text
+    ta.style.cssText = 'position:fixed;opacity:0;pointer-events:none'
+    document.body.appendChild(ta)
+    ta.focus()
+    ta.select()
+    // eslint-disable-next-line @typescript-eslint/no-deprecated
+    document.execCommand('copy')
+    document.body.removeChild(ta)
+  }
+}
+
 export const IDE_CREATE_COMMANDS: Record<string, string> = {
   cursor:   'create my wiki',
   vscode:   '/create-wiki',
@@ -56,12 +73,23 @@ export default function IDELaunchModal({ title, wikiPath, fixedCommand, commandM
     setLaunched(null)
     setCopiedCommand(null)
     if (fixedCommand) {
-      navigator.clipboard.writeText(fixedCommand).catch(() => {})
+      writeToClipboard(fixedCommand).catch(() => {})
       setCopiedCommand(fixedCommand)
     }
   }, [fixedCommand])
 
   const handleOpen = async (ide: IDEInfo) => {
+    const command = fixedCommand
+      ?? commandMap?.[ide.id]
+      ?? IDE_CREATE_COMMANDS[ide.id]
+      ?? '/create-wiki'
+
+    // Copy BEFORE opening the IDE — the browser window must still be focused
+    // for the Clipboard API to work. Once the IDE is brought to the front the
+    // document loses focus and writeText() throws NotAllowedError.
+    await writeToClipboard(command)
+    setCopiedCommand(command)
+
     setLaunching(ide.id)
     try {
       await openInIDE(ide.id, wikiPath)
@@ -71,14 +99,6 @@ export default function IDELaunchModal({ title, wikiPath, fixedCommand, commandM
       setLaunching(null)
     }
     setLaunched(ide.id)
-
-    const command = fixedCommand
-      ?? commandMap?.[ide.id]
-      ?? IDE_CREATE_COMMANDS[ide.id]
-      ?? '/create-wiki'
-
-    await navigator.clipboard.writeText(command)
-    setCopiedCommand(command)
   }
 
   return (
