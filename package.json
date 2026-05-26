@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "dev": "concurrently -n server,ui -c cyan,magenta \"npm run dev:server\" \"npm run dev:ui\"",
-    "dev:server": "NODE_ENV=development node --import tsx server/index.ts",
+    "dev:server": "cross-env NODE_ENV=development node --import tsx server/index.ts",
     "dev:ui": "vite",
     "build": "tsc -b && vite build",
     "preview": "vite preview"
@@ -40,6 +40,7 @@
     "@vitejs/plugin-react": "^4.2.1",
     "autoprefixer": "^10.4.17",
     "concurrently": "^8.2.2",
+    "cross-env": "^10.1.0",
     "postcss": "^8.4.35",
     "tailwindcss": "^3.4.1",
     "tsx": "^4.7.1",
