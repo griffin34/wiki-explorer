@@ -107,6 +107,7 @@ function getAllMdFiles(dir: string): string[] {
   if (!fs.existsSync(dir)) return results
   function walk(d: string) {
     for (const entry of fs.readdirSync(d, { withFileTypes: true })) {
+      if (entry.name.startsWith('.')) continue
       const full = path.join(d, entry.name)
       if (entry.isDirectory()) walk(full)
       else if (entry.name.endsWith('.md')) results.push(full)
@@ -121,7 +122,7 @@ function getAllRawFiles(v: WikiConfig): string[] {
   for (const dir of [inboxDir(v), rawDir(v)]) {
     if (!dir || !fs.existsSync(dir)) continue
     for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-      if (entry.isFile()) {
+      if (entry.isFile() && !entry.name.startsWith('.')) {
         const p = path.join(dir, entry.name)
         if (!results.includes(p)) results.push(p)
       }

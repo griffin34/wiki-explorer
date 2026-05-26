@@ -16,11 +16,11 @@ import {
   Send,
   FileText,
   ClipboardCopy,
-  Check,
 } from 'lucide-react'
-import { useSearch, useRawFiles } from '../hooks/useWiki'
+import { useSearch, useRawFiles, useWikis } from '../hooks/useWiki'
 import type { WikiPageMeta, SearchResult, PageType, RawFile } from '../types'
 import { PAGE_TYPE_COLORS } from '../types'
+import IDELaunchModal from './IDELaunchModal'
 
 interface SidebarProps {
   wikiId: string
@@ -356,42 +356,41 @@ function IngestSection({ wikiId, inboxExists, onUploaded }: { wikiId: string; in
   )
 }
 
-function InboxSection({ wikiId, files, loading, reload }: { wikiId: string; files: RawFile[]; loading: boolean; reload: () => void }) {
-  const [copiedFile, setCopiedFile] = useState<string | null>(null)
+function InboxSection({ wikiId: _wikiId, wikiPath, files, loading, reload }: { wikiId: string; wikiPath: string; files: RawFile[]; loading: boolean; reload: () => void }) {
+  const [ingestTarget, setIngestTarget] = useState<RawFile | null>(null)
 
   const inboxFiles: RawFile[] = files.filter((f) => f.path.startsWith('inbox/'))
-
-  const handleCopyPrompt = async (file: RawFile) => {
-    const prompt = `ADD raw/inbox/${file.name}`
-    try {
-      await navigator.clipboard.writeText(prompt)
-      setCopiedFile(file.name)
-      setTimeout(() => setCopiedFile(null), 2500)
-    } catch {
-      // fallback: select text from a hidden input
-    }
-  }
 
   if (loading || inboxFiles.length === 0) return null
 
   return (
-    <div className="border-t border-[var(--border)] py-2">
-      <div className="flex items-center justify-between px-4 pb-1.5">
-        <p className="text-xs font-semibold text-[var(--text-muted)] uppercase tracking-wider">
-          Inbox ({inboxFiles.length})
-        </p>
-        <button
-          onClick={reload}
-          className="text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
-          title="Refresh inbox"
-        >
-          <ScrollText size={11} />
-        </button>
-      </div>
-      <div className="px-2 space-y-0.5">
-        {inboxFiles.map((file) => {
-          const copied = copiedFile === file.name
-          return (
+    <>
+      {/* IDE launch modal — rendered at root level so it overlays the sidebar */}
+      {ingestTarget && (
+        <IDELaunchModal
+          key={ingestTarget.name}
+          title={`Ingest ${ingestTarget.name}`}
+          wikiPath={wikiPath}
+          fixedCommand={`ADD raw/inbox/${ingestTarget.name}`}
+          onClose={() => setIngestTarget(null)}
+        />
+      )}
+
+      <div className="border-t border-[var(--border)] py-2">
+        <div className="flex items-center justify-between px-4 pb-1.5">
+          <p className="text-xs font-semibold text-[var(--text-muted)] uppercase tracking-wider">
+            Inbox ({inboxFiles.length})
+          </p>
+          <button
+            onClick={reload}
+            className="text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
+            title="Refresh inbox"
+          >
+            <ScrollText size={11} />
+          </button>
+        </div>
+        <div className="px-2 space-y-0.5">
+          {inboxFiles.map((file) => (
             <div
               key={file.name}
               className="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-[var(--bg-elevated)]/30 group"
@@ -401,30 +400,26 @@ function InboxSection({ wikiId, files, loading, reload }: { wikiId: string; file
                 {file.name}
               </span>
               <button
-                onClick={() => handleCopyPrompt(file)}
-                title="Copy ingest prompt to clipboard"
-                className={`
-                  flex items-center gap-1 px-1.5 py-0.5 rounded text-xs transition-colors flex-shrink-0
-                  ${copied
-                    ? 'text-[var(--success)] bg-[var(--success-faint)]'
-                    : 'text-[var(--text-muted)] hover:text-[var(--accent)] hover:bg-[var(--accent-faint)] opacity-0 group-hover:opacity-100'
-                  }
-                `}
+                onClick={() => setIngestTarget(file)}
+                title="Open in editor and copy ingest command"
+                className="flex items-center gap-1 px-1.5 py-0.5 rounded text-xs transition-colors flex-shrink-0 text-[var(--text-muted)] hover:text-[var(--accent)] hover:bg-[var(--accent-faint)] opacity-0 group-hover:opacity-100"
               >
-                {copied ? <Check size={11} /> : <ClipboardCopy size={11} />}
-                <span>{copied ? 'Copied!' : 'Ingest'}</span>
+                <ClipboardCopy size={11} />
+                <span>Ingest</span>
               </button>
             </div>
-          )
-        })}
+          ))}
+        </div>
       </div>
-    </div>
+    </>
   )
 }
 
 export default function Sidebar({ wikiId, pages }: SidebarProps) {
   const { query, setQuery, results, searching } = useSearch(wikiId)
   const { files: rawFiles, inboxExists, loading: rawLoading, reload: reloadRaw } = useRawFiles(wikiId)
+  const { wikis } = useWikis()
+  const wikiPath = wikis.find((w) => w.id === wikiId)?.path ?? ''
   const [showSearch, setShowSearch] = useState(false)
 
   return (
@@ -503,7 +498,7 @@ export default function Sidebar({ wikiId, pages }: SidebarProps) {
       </div>
 
       {/* Inbox — files pending ingest */}
-      <InboxSection wikiId={wikiId} files={rawFiles} loading={rawLoading} reload={reloadRaw} />
+      <InboxSection wikiId={wikiId} wikiPath={wikiPath} files={rawFiles} loading={rawLoading} reload={reloadRaw} />
 
       {/* Add Source — upload / paste */}
       <div className="border-t border-[var(--border)] py-2">

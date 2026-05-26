@@ -23,14 +23,34 @@ import type { IDEInfo } from '../hooks/useWiki'
 import { WIKI_DEFAULT_COLORS } from '../types'
 import type { WikiConfig } from '../types'
 import { useTheme } from '../ThemeContext'
+import { IDE_CREATE_COMMANDS } from './IDELaunchModal'
 
 // ─── IDE Picker (shown after wiki creation) ───────────────────────────────────
 
 function IDEPicker({ wikiPath, onDone }: { wikiPath: string; onDone: () => void }) {
+  return (
+    <div className="space-y-4">
+      <p className="text-xs text-[var(--text-muted)]">
+        Open this wiki folder in your editor, then run the setup command in the chat window:
+      </p>
+      <IDELaunchModalInline wikiPath={wikiPath} />
+      <button
+        onClick={onDone}
+        className="w-full py-2 rounded-lg text-sm text-[var(--text-muted)] hover:text-[var(--text-primary)] border border-[var(--border)] hover:border-[var(--border-strong)] transition-colors"
+      >
+        Done
+      </button>
+    </div>
+  )
+}
+
+/** Inline (non-overlay) version of the IDE launcher used inside the AddWikiModal step. */
+function IDELaunchModalInline({ wikiPath }: { wikiPath: string }) {
   const [ides, setIDEs] = useState<IDEInfo[]>([])
   const [loading, setLoading] = useState(true)
   const [launching, setLaunching] = useState<string | null>(null)
   const [launched, setLaunched] = useState<string | null>(null)
+  const [copiedCommand, setCopiedCommand] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
@@ -43,6 +63,9 @@ function IDEPicker({ wikiPath, onDone }: { wikiPath: string; onDone: () => void 
     try {
       await openInIDE(ide.id, wikiPath)
       setLaunched(ide.id)
+      const command = IDE_CREATE_COMMANDS[ide.id] ?? '/create-wiki'
+      await navigator.clipboard.writeText(command)
+      setCopiedCommand(command)
     } catch (e) {
       setError(String(e))
     } finally {
@@ -51,29 +74,25 @@ function IDEPicker({ wikiPath, onDone }: { wikiPath: string; onDone: () => void 
   }
 
   const IDE_COLORS: Record<string, string> = {
-    cursor: '#89b4fa',
-    vscode: '#4fc3f7',
-    windsurf: '#a6e3a1',
-    intellij: '#f38ba8',
-    webstorm: '#89dceb',
-    pycharm: '#cba6f7',
+    cursor: '#89b4fa', vscode: '#4fc3f7', windsurf: '#a6e3a1',
+    intellij: '#f38ba8', webstorm: '#89dceb', pycharm: '#cba6f7',
   }
 
   return (
-    <div className="space-y-4">
-      <p className="text-xs text-[var(--text-muted)]">Open this wiki folder in your editor to start working with the LLM:</p>
-
+    <div className="space-y-3">
       {loading ? (
         <div className="flex items-center gap-2 text-[var(--text-muted)]">
           <Loader2 size={14} className="animate-spin" />
           <span className="text-sm">Detecting installed editors…</span>
         </div>
       ) : ides.length === 0 ? (
-        <p className="text-sm text-[var(--text-muted)]">No supported editors detected. Open <code className="text-[var(--text-primary)] bg-[var(--bg-base)] px-1 rounded">{wikiPath}</code> manually.</p>
+        <p className="text-sm text-[var(--text-muted)]">
+          No supported editors detected. Open <code className="text-[var(--text-primary)] bg-[var(--bg-base)] px-1 rounded">{wikiPath}</code> manually.
+        </p>
       ) : (
         <div className="grid grid-cols-2 gap-2">
           {ides.map((ide) => {
-            const color = IDE_COLORS[ide.id] ?? '#6c7086'
+            const color = IDE_COLORS[ide.id] ?? 'var(--text-muted)'
             const isLaunching = launching === ide.id
             const isLaunched = launched === ide.id
             return (
@@ -88,7 +107,7 @@ function IDEPicker({ wikiPath, onDone }: { wikiPath: string; onDone: () => void 
                 }}
               >
                 <MonitorPlay size={15} style={{ color }} className="flex-shrink-0" />
-                <span className="text-sm font-medium" style={{ color: isLaunched ? color : '#cdd6f4' }}>
+                <span className="text-sm font-medium" style={{ color: isLaunched ? color : 'var(--text-primary)' }}>
                   {isLaunching ? 'Opening…' : isLaunched ? 'Opened!' : ide.name}
                 </span>
                 {isLaunching && <Loader2 size={12} className="animate-spin ml-auto" style={{ color }} />}
@@ -98,17 +117,16 @@ function IDEPicker({ wikiPath, onDone }: { wikiPath: string; onDone: () => void 
           })}
         </div>
       )}
-
-      {error && (
-        <p className="text-xs text-[var(--error)]">{error}</p>
+      {copiedCommand && (
+        <div className="flex items-start gap-2.5 px-3 py-2.5 rounded-lg bg-[var(--accent-faint)] border border-[var(--accent-border)]">
+          <Check size={14} className="text-[var(--accent)] mt-0.5 flex-shrink-0" />
+          <div className="min-w-0">
+            <p className="text-xs text-[var(--text-secondary)] leading-snug">Copied — paste into the editor chat:</p>
+            <code className="text-xs font-mono font-semibold text-[var(--accent)] mt-0.5 block">{copiedCommand}</code>
+          </div>
+        </div>
       )}
-
-      <button
-        onClick={onDone}
-        className="w-full py-2 rounded-lg text-sm text-[var(--text-muted)] hover:text-[var(--text-primary)] border border-[var(--border)] hover:border-[var(--border-strong)] transition-colors"
-      >
-        Done
-      </button>
+      {error && <p className="text-xs text-[var(--error)]">{error}</p>}
     </div>
   )
 }

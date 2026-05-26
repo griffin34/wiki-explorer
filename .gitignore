@@ -7,16 +7,9 @@ dist/
 # Wiki data (local registry — paths are machine-specific)
 data/
 
-# Old nested copy — not used
-ui/
-
 # macOS
 .DS_Store
 
 # Env / secrets
 .env
 .env.*
-
-# Editor
-.vscode/
-*.local
