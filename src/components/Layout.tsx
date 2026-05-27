@@ -31,7 +31,7 @@ export default function Layout() {
       <aside
         className={`wiki-sidebar flex-shrink-0 border-r border-[var(--border)] transition-all duration-200 overflow-hidden ${sidebarOpen ? 'w-72' : 'w-0'}`}
       >
-        {sidebarOpen && <Sidebar wikiId={wikiId} pages={pages} />}
+        {sidebarOpen && <Sidebar wikiId={wikiId} pages={pages} mode={wiki?.mode ?? 'wiki'} />}
       </aside>
 
       {/* Main */}

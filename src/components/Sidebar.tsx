@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect, useRef } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { useDropzone } from 'react-dropzone'
 import {
@@ -25,6 +25,7 @@ import IDELaunchModal from './IDELaunchModal'
 interface SidebarProps {
   wikiId: string
   pages: WikiPageMeta[]
+  mode?: 'wiki' | 'folder'
 }
 
 const TYPE_ICONS: Record<PageType | string, string> = {
@@ -188,6 +189,61 @@ function SearchResults({
   )
 }
 
+// ── Outlook / cross-app drag-and-drop helpers ─────────────────────────────────
+// react-dropzone only activates when 'Files' appears in dataTransfer.types.
+// Outlook on Mac omits this for dragged emails, so we bypass it with native
+// events and a multi-method file extraction approach.
+
+interface DropSnapshot {
+  stdFiles: File[]
+  itemFiles: File[]
+  entries: FileSystemFileEntry[]
+  plainText: string
+}
+
+/** Synchronously snapshot everything from a DataTransfer before it clears. */
+function snapshotDrop(dt: DataTransfer): DropSnapshot {
+  return {
+    stdFiles: Array.from(dt.files),
+    itemFiles: Array.from(dt.items)
+      .filter((i) => i.kind === 'file')
+      .map((i) => i.getAsFile())
+      .filter((f): f is File => f !== null),
+    entries: Array.from(dt.items)
+      .filter((i) => i.kind === 'file')
+      .map((i) => (i as DataTransferItem & { webkitGetAsEntry?(): FileSystemEntry | null }).webkitGetAsEntry?.())
+      .filter((e): e is FileSystemFileEntry => e?.isFile === true),
+    plainText: (() => { try { return dt.getData('text/plain') } catch { return '' } })(),
+  }
+}
+
+/** Resolve a snapshot to File objects. Async only for webkitGetAsEntry resolution. */
+async function resolveDropSnapshot(snap: DropSnapshot): Promise<File[]> {
+  // 1. Standard files (most drag sources)
+  if (snap.stdFiles.length > 0) return snap.stdFiles
+
+  // 2. items.getAsFile() — works when .files is inexplicably empty
+  if (snap.itemFiles.length > 0) return snap.itemFiles
+
+  // 3. webkitGetAsEntry async resolution — macOS promised files (Outlook .eml)
+  if (snap.entries.length > 0) {
+    const resolved = await Promise.all(
+      snap.entries.map((e) => new Promise<File | null>((ok) => e.file(ok, () => ok(null))))
+    )
+    const entryFiles = resolved.filter((f): f is File => f !== null)
+    if (entryFiles.length > 0) return entryFiles
+  }
+
+  // 4. Email body text — Outlook may not expose a file at all, but does populate
+  //    text/plain with the email body. Save it as a timestamped .txt file.
+  if (snap.plainText.trim()) {
+    const ts = new Date().toISOString().slice(0, 19).replace(/[T:]/g, '-')
+    return [new File([snap.plainText], `email-${ts}.txt`, { type: 'text/plain' })]
+  }
+
+  return []
+}
+
 function IngestSection({ wikiId, inboxExists, onUploaded }: { wikiId: string; inboxExists: boolean | null; onUploaded: () => void }) {
   const [tab, setTab] = useState<'upload' | 'paste'>('upload')
   const [busy, setBusy] = useState(false)
@@ -221,13 +277,13 @@ function IngestSection({ wikiId, inboxExists, onUploaded }: { wikiId: string; in
   }
 
   // ── File upload ──────────────────────────────────────────────────────────
-  const onDrop = useCallback(
-    async (acceptedFiles: File[]) => {
-      if (!acceptedFiles.length) return
+  const handleFiles = useCallback(
+    async (files: File[]) => {
+      if (!files.length) return
       setBusy(true)
       try {
         const form = new FormData()
-        for (const f of acceptedFiles) form.append('files', f)
+        for (const f of files) form.append('files', f)
         const res = await fetch(`/api/wikis/${wikiId}/raw/upload`, { method: 'POST', body: form })
         if (!res.ok) throw new Error(`Server error: ${res.status}`)
         const data = (await res.json()) as { uploaded: Array<{ name: string }> }
@@ -242,7 +298,51 @@ function IngestSection({ wikiId, inboxExists, onUploaded }: { wikiId: string; in
     [wikiId, onUploaded]
   )
 
-  const { getRootProps, getInputProps, isDragActive } = useDropzone({ onDrop })
+  // react-dropzone is kept only for click-to-browse; native events handle the
+  // actual drag so Outlook (which omits 'Files' from dataTransfer.types) works.
+  const { getInputProps, open: openFilePicker } = useDropzone({
+    onDrop: handleFiles,
+    noDrag: true,
+    noClick: true,
+  })
+
+  const dropZoneRef = useRef<HTMLDivElement>(null)
+  const [nativeDragActive, setNativeDragActive] = useState(false)
+  const handleFilesRef = useRef(handleFiles)
+  handleFilesRef.current = handleFiles
+
+  useEffect(() => {
+    const el = dropZoneRef.current
+    if (!el) return
+
+    const onDragOver = (e: DragEvent) => { e.preventDefault(); e.stopPropagation(); setNativeDragActive(true) }
+    const onDragEnter = (e: DragEvent) => { e.preventDefault(); e.stopPropagation(); setNativeDragActive(true) }
+    const onDragLeave = (e: DragEvent) => {
+      e.preventDefault()
+      if (!el.contains(e.relatedTarget as Node | null)) setNativeDragActive(false)
+    }
+    const onDrop = (e: DragEvent) => {
+      e.preventDefault()
+      e.stopPropagation()
+      setNativeDragActive(false)
+      if (!e.dataTransfer) return
+      // Snapshot synchronously (DataTransfer clears after handler returns),
+      // then resolve asynchronously and upload.
+      const snap = snapshotDrop(e.dataTransfer)
+      resolveDropSnapshot(snap).then((files) => { if (files.length) handleFilesRef.current(files) })
+    }
+
+    el.addEventListener('dragover', onDragOver)
+    el.addEventListener('dragenter', onDragEnter)
+    el.addEventListener('dragleave', onDragLeave)
+    el.addEventListener('drop', onDrop)
+    return () => {
+      el.removeEventListener('dragover', onDragOver)
+      el.removeEventListener('dragenter', onDragEnter)
+      el.removeEventListener('dragleave', onDragLeave)
+      el.removeEventListener('drop', onDrop)
+    }
+  }, [])
 
   // ── Paste text ────────────────────────────────────────────────────────────
   const handlePasteSubmit = useCallback(async () => {
@@ -291,10 +391,11 @@ function IngestSection({ wikiId, inboxExists, onUploaded }: { wikiId: string; in
 
       {tab === 'upload' ? (
         <div
-          {...getRootProps()}
+          ref={dropZoneRef}
+          onClick={openFilePicker}
           className={`
             p-3 rounded-lg border-2 border-dashed cursor-pointer transition-colors text-center
-            ${isDragActive
+            ${nativeDragActive
               ? 'border-[var(--accent)] bg-[var(--accent-faint)] text-[var(--accent)]'
               : 'border-[var(--border)] text-[var(--text-muted)] hover:border-[var(--border-strong)] hover:text-[var(--text-secondary)]'
             }
@@ -310,7 +411,7 @@ function IngestSection({ wikiId, inboxExists, onUploaded }: { wikiId: string; in
             <div className="flex flex-col items-center gap-1">
               <Upload size={13} />
               <span className="text-xs">
-                {isDragActive ? 'Drop files here' : 'Drop files or click to upload'}
+                {nativeDragActive ? 'Drop files here' : 'Drop files or click to upload'}
               </span>
             </div>
           )}
@@ -415,12 +516,14 @@ function InboxSection({ wikiId: _wikiId, wikiPath, files, loading, reload }: { w
   )
 }
 
-export default function Sidebar({ wikiId, pages }: SidebarProps) {
+export default function Sidebar({ wikiId, pages, mode = 'wiki' }: SidebarProps) {
   const { query, setQuery, results, searching } = useSearch(wikiId)
   const { files: rawFiles, inboxExists, loading: rawLoading, reload: reloadRaw } = useRawFiles(wikiId)
   const { wikis } = useWikis()
   const wikiPath = wikis.find((w) => w.id === wikiId)?.path ?? ''
   const [showSearch, setShowSearch] = useState(false)
+
+  const isFolder = mode === 'folder'
 
   return (
     <div className="wiki-sidebar flex flex-col h-full">
@@ -428,7 +531,14 @@ export default function Sidebar({ wikiId, pages }: SidebarProps) {
       <div className="px-4 py-3 border-b border-[var(--border)]">
         <div className="flex items-center gap-2 mb-3">
           <BookOpen size={16} className="text-[var(--accent)]" />
-          <span className="font-semibold text-[var(--text-primary)] text-sm">Wiki</span>
+          <span className="font-semibold text-[var(--text-primary)] text-sm">
+            {isFolder ? 'Folder' : 'Wiki'}
+          </span>
+          {isFolder && (
+            <span className="ml-auto text-[10px] px-1.5 py-0.5 rounded bg-[var(--bg-elevated)] text-[var(--text-muted)] uppercase tracking-wider">
+              read-only
+            </span>
+          )}
         </div>
 
         {/* Search */}
@@ -478,35 +588,39 @@ export default function Sidebar({ wikiId, pages }: SidebarProps) {
         </div>
       </div>
 
-      {/* Nav */}
-      <div className="px-2 py-2 border-b border-[var(--border)] space-y-0.5">
-        <NavItem
-          label="Graph view"
-          to={`/wiki/${wikiId}/graph`}
-          icon={<GitGraph size={14} />}
-        />
-        <NavItem
-          label="Activity log"
-          to={`/wiki/${wikiId}/log`}
-          icon={<ScrollText size={14} />}
-        />
-      </div>
+      {/* Nav — wiki-only views */}
+      {!isFolder && (
+        <div className="px-2 py-2 border-b border-[var(--border)] space-y-0.5">
+          <NavItem
+            label="Graph view"
+            to={`/wiki/${wikiId}/graph`}
+            icon={<GitGraph size={14} />}
+          />
+          <NavItem
+            label="Activity log"
+            to={`/wiki/${wikiId}/log`}
+            icon={<ScrollText size={14} />}
+          />
+        </div>
+      )}
 
-      {/* Page tree */}
+      {/* Page / file tree */}
       <div className="flex-1 overflow-y-auto px-2 py-2">
         <PageTree wikiId={wikiId} pages={pages} />
       </div>
 
-      {/* Inbox — files pending ingest */}
-      <InboxSection wikiId={wikiId} wikiPath={wikiPath} files={rawFiles} loading={rawLoading} reload={reloadRaw} />
-
-      {/* Add Source — upload / paste */}
-      <div className="border-t border-[var(--border)] py-2">
-        <p className="px-4 pb-1.5 text-xs font-semibold text-[var(--text-muted)] uppercase tracking-wider">
-          Add Source
-        </p>
-        <IngestSection wikiId={wikiId} inboxExists={inboxExists} onUploaded={reloadRaw} />
-      </div>
+      {/* Inbox + Add Source — wiki-only */}
+      {!isFolder && (
+        <>
+          <InboxSection wikiId={wikiId} wikiPath={wikiPath} files={rawFiles} loading={rawLoading} reload={reloadRaw} />
+          <div className="border-t border-[var(--border)] py-2">
+            <p className="px-4 pb-1.5 text-xs font-semibold text-[var(--text-muted)] uppercase tracking-wider">
+              Add Source
+            </p>
+            <IngestSection wikiId={wikiId} inboxExists={inboxExists} onUploaded={reloadRaw} />
+          </div>
+        </>
+      )}
     </div>
   )
 }

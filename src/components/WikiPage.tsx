@@ -66,6 +66,17 @@ export default function WikiPage() {
   }
 
   if (error || !page) {
+    // When landing on "index" with no matching file (common in plain-folder mode),
+    // show a neutral prompt rather than a red error.
+    if (pageId === 'index') {
+      return (
+        <div className="flex flex-col items-center justify-center h-full gap-3 text-[var(--text-muted)]">
+          <FileText size={36} className="opacity-30" />
+          <p className="text-sm">Select a file from the sidebar to get started.</p>
+        </div>
+      )
+    }
+
     return (
       <div className="max-w-3xl mx-auto px-8 py-12">
         <div className="flex items-center gap-3 text-[var(--error)] mb-4">
