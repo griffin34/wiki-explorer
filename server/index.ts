@@ -88,6 +88,10 @@ function findContentRoot(v: WikiConfig): string | null {
   return null
 }
 
+// Returns true when the folder has a proper wiki/raw directory structure.
+// Plain markdown folders (no wiki/ or raw/) use "folder" mode instead.
+const isWikiMode = (v: WikiConfig): boolean => findContentRoot(v) !== null
+
 const wikiDir = (v: WikiConfig) => path.join(findContentRoot(v) ?? v.path, 'wiki')
 const inboxDir = (v: WikiConfig) => {
   const root = findContentRoot(v)
@@ -97,6 +101,10 @@ const rawDir = (v: WikiConfig) => {
   const root = findContentRoot(v)
   return root ? path.join(root, 'raw') : null
 }
+
+// Base directory used to compute page IDs for each mode
+const pageBaseDir = (v: WikiConfig): string =>
+  isWikiMode(v) ? wikiDir(v) : v.path
 
 // ─── File Utilities ───────────────────────────────────────────────────────────
 
@@ -142,7 +150,7 @@ function extractLinks(content: string): string[] {
 }
 
 function pageIdFromPath(filePath: string, v: WikiConfig): string {
-  return path.relative(wikiDir(v), filePath)
+  return path.relative(pageBaseDir(v), filePath)
     .replace(/\.md$/, '')
     .replace(/\\/g, '/')   // normalize Windows backslashes → forward slashes for URLs
 }
@@ -150,8 +158,9 @@ function pageIdFromPath(filePath: string, v: WikiConfig): string {
 // ─── Wiki Stats ───────────────────────────────────────────────────────────────
 
 function wikiStats(v: WikiConfig) {
-  const pages = getAllMdFiles(wikiDir(v))
-  const sources = getAllRawFiles(v)
+  const wikiMode = isWikiMode(v)
+  const pages = getAllMdFiles(wikiMode ? wikiDir(v) : v.path)
+  const sources = wikiMode ? getAllRawFiles(v) : []
   const logPath = path.join(wikiDir(v), 'log.md')
   let lastActivity = v.createdAt
   if (fs.existsSync(logPath)) {
@@ -378,7 +387,11 @@ app.get('/api/pick-folder', async (_req, res) => {
 
 app.get('/api/wikis', (_req, res) => {
   const wikis = loadWikis()
-  const result = wikis.map((v) => ({ ...v, stats: wikiStats(v) }))
+  const result = wikis.map((v) => ({
+    ...v,
+    mode: isWikiMode(v) ? 'wiki' : 'folder',
+    stats: wikiStats(v),
+  }))
   res.json(result)
 })
 
@@ -446,7 +459,8 @@ app.use('/api/wikis/:id/*', (req, res, next) => {
 
 app.get('/api/wikis/:id/wiki', (_req, res) => {
   const v = res.locals.wiki as WikiConfig
-  const files = getAllMdFiles(wikiDir(v))
+  const scanDir = isWikiMode(v) ? wikiDir(v) : v.path
+  const files = getAllMdFiles(scanDir)
   const pages = files.map((f) => {
     const raw = safeRead(f) ?? ''
     const { data, content } = matter(raw)
@@ -471,20 +485,23 @@ app.get('/api/wikis/:id/wiki', (_req, res) => {
 app.get('/api/wikis/:id/wiki/*', (req, res) => {
   const v = res.locals.wiki as WikiConfig
   const pageId = (req.params as Record<string, string>)['0']
-  const filePath = path.join(wikiDir(v), pageId + '.md')
+  const baseDir = isWikiMode(v) ? wikiDir(v) : v.path
+  const filePath = path.join(baseDir, pageId + '.md')
   const raw = safeRead(filePath)
   if (!raw) return res.status(404).json({ error: 'Page not found' })
 
   const { data, content } = matter(raw)
   const links = extractLinks(content)
 
-  // Compute backlinks
+  // Compute backlinks (wiki-mode only; plain folders don't use [[WikiLink]] syntax)
   const backlinks: string[] = []
-  for (const f of getAllMdFiles(wikiDir(v))) {
-    const fLinks = extractLinks(safeRead(f) ?? '')
-    const targetName = pageId.split('/').pop() || pageId
-    if (fLinks.some((l) => l === targetName || l === pageId)) {
-      backlinks.push(pageIdFromPath(f, v))
+  if (isWikiMode(v)) {
+    for (const f of getAllMdFiles(baseDir)) {
+      const fLinks = extractLinks(safeRead(f) ?? '')
+      const targetName = pageId.split('/').pop() || pageId
+      if (fLinks.some((l) => l === targetName || l === pageId)) {
+        backlinks.push(pageIdFromPath(f, v))
+      }
     }
   }
 
@@ -539,7 +556,8 @@ app.get('/api/wikis/:id/search', (req, res) => {
   const q = ((req.query.q as string) || '').toLowerCase().trim()
   if (!q) return res.json([])
 
-  const results = getAllMdFiles(wikiDir(v)).flatMap((f) => {
+  const scanDir = isWikiMode(v) ? wikiDir(v) : v.path
+  const results = getAllMdFiles(scanDir).flatMap((f) => {
     const raw = safeRead(f) ?? ''
     const { data, content } = matter(raw)
     const id = pageIdFromPath(f, v)

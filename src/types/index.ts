@@ -6,6 +6,8 @@ export interface WikiConfig {
   path: string
   color: string
   createdAt: string
+  /** 'wiki' = structured wiki folder (has wiki/ and raw/); 'folder' = plain markdown folder */
+  mode?: 'wiki' | 'folder'
   stats?: {
     pageCount: number
     sourceCount: number
