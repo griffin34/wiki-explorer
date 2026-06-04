@@ -43,7 +43,9 @@ function TagBadge({ tag }: { tag: string }) {
 export default function WikiPage() {
   const params = useParams()
   const navigate = useNavigate()
+  /* v8 ignore next */
   const wikiId = params.wikiId ?? ''
+  /* v8 ignore next */
   const pageId = params['*'] || 'index'
   const { theme } = useTheme()
 

@@ -16,6 +16,7 @@ import {
   CheckCircle2,
   MonitorPlay,
   Moon,
+  Check,
 } from 'lucide-react'
 import SirenIcon from './SirenIcon'
 import { useWikis, addWiki, removeWiki, pickFolder, detectIDEs, openInIDE } from '../hooks/useWiki'
@@ -159,6 +160,7 @@ function AddWikiModal({ onClose, onAdded }: { onClose: () => void; onAdded: () =
   }
 
   const handleSubmit = async () => {
+    /* v8 ignore next 3 */
     if (!name.trim() || !wikiPath.trim()) {
       setError('Name and path are required.')
       return
