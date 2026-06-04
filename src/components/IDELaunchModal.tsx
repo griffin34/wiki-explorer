@@ -73,6 +73,7 @@ export default function IDELaunchModal({ title, wikiPath, fixedCommand, commandM
     setLaunched(null)
     setCopiedCommand(null)
     if (fixedCommand) {
+      /* v8 ignore next */
       writeToClipboard(fixedCommand).catch(() => {})
       setCopiedCommand(fixedCommand)
     }

@@ -11,6 +11,7 @@ export default function Layout() {
   const { wikiId = '' } = useParams<{ wikiId: string }>()
   const navigate = useNavigate()
   const [sidebarOpen, setSidebarOpen] = useState(true)
+  const [refreshToken, setRefreshToken] = useState(0)
   const { theme, toggleTheme } = useTheme()
 
   const { pages, reload: reloadPages } = usePageList(wikiId)
@@ -19,7 +20,10 @@ export default function Layout() {
 
   const handleWsEvent = useCallback(
     (e: WsEvent) => {
-      if ('wikiId' in e.data && e.data.wikiId === wikiId) reloadPages()
+      if ('wikiId' in e.data && e.data.wikiId === wikiId) {
+        reloadPages()
+        setRefreshToken((value) => value + 1)
+      }
     },
     [wikiId, reloadPages]
   )
@@ -79,7 +83,7 @@ export default function Layout() {
 
         {/* Page content */}
         <div className="flex-1 overflow-auto bg-[var(--bg-base)]">
-          <Outlet />
+          <Outlet context={{ refreshToken }} />
         </div>
       </main>
     </div>
