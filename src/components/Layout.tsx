@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 import { Outlet, useParams, useNavigate } from 'react-router-dom'
 import { PanelLeftClose, PanelLeftOpen, ChevronLeft, Moon } from 'lucide-react'
 import SirenIcon from './SirenIcon'
@@ -11,6 +11,8 @@ export default function Layout() {
   const { wikiId = '' } = useParams<{ wikiId: string }>()
   const navigate = useNavigate()
   const [sidebarOpen, setSidebarOpen] = useState(true)
+  const [sidebarWidth, setSidebarWidth] = useState(288) // w-72 = 288px
+  const [isResizing, setIsResizing] = useState(false)
   const [refreshToken, setRefreshToken] = useState(0)
   const { theme, toggleTheme } = useTheme()
 
@@ -29,13 +31,53 @@ export default function Layout() {
   )
   useWikiSocket(handleWsEvent)
 
+  // Resize handlers
+  const startResizing = useCallback((e: React.MouseEvent) => {
+    e.preventDefault()
+    setIsResizing(true)
+  }, [])
+
+  useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!isResizing) return
+      const newWidth = Math.min(Math.max(200, e.clientX), 600) // min 200px, max 600px
+      setSidebarWidth(newWidth)
+    }
+
+    const handleMouseUp = () => {
+      setIsResizing(false)
+    }
+
+    if (isResizing) {
+      document.addEventListener('mousemove', handleMouseMove)
+      document.addEventListener('mouseup', handleMouseUp)
+      document.body.style.cursor = 'col-resize'
+      document.body.style.userSelect = 'none'
+    }
+
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove)
+      document.removeEventListener('mouseup', handleMouseUp)
+      document.body.style.cursor = ''
+      document.body.style.userSelect = ''
+    }
+  }, [isResizing])
+
   return (
     <div className="flex h-screen overflow-hidden bg-[var(--bg-base)]">
       {/* Sidebar */}
       <aside
-        className={`wiki-sidebar flex-shrink-0 border-r border-[var(--border)] transition-all duration-200 overflow-hidden ${sidebarOpen ? 'w-72' : 'w-0'}`}
+        className={`wiki-sidebar flex-shrink-0 border-r border-[var(--border)] overflow-hidden relative ${sidebarOpen ? '' : 'w-0'}`}
+        style={{ width: sidebarOpen ? sidebarWidth : 0, transition: isResizing ? 'none' : 'width 200ms' }}
       >
         {sidebarOpen && <Sidebar wikiId={wikiId} pages={pages} mode={wiki?.mode ?? 'wiki'} />}
+        {/* Resize handle */}
+        {sidebarOpen && (
+          <div
+            onMouseDown={startResizing}
+            className={`absolute top-0 right-0 w-1 h-full cursor-col-resize hover:bg-[var(--accent)] transition-colors ${isResizing ? 'bg-[var(--accent)]' : 'bg-transparent'}`}
+          />
+        )}
       </aside>
 
       {/* Main */}
