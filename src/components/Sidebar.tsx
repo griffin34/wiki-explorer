@@ -206,16 +206,6 @@ function IngestSection({ wikiId, inboxExists, onUploaded }: { wikiId: string; in
   const [success, setSuccess] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
-  if (inboxExists === false) {
-    return (
-      <div className="px-2">
-        <div className="p-3 rounded-lg border border-[var(--error-border)] bg-[var(--error-faint)] text-xs text-[var(--error)] space-y-1">
-          <p className="font-medium">No raw/inbox/ folder</p>
-          <p className="text-[var(--error)]/70">Run <code className="bg-[var(--bg-base)] px-1 rounded">/create-wiki</code> in your IDE to set up the folder structure.</p>
-        </div>
-      </div>
-    )
-  }
   // paste-text state
   const [pasteFilename, setPasteFilename] = useState('')
   const [pasteContent, setPasteContent] = useState('')
@@ -329,6 +319,18 @@ function IngestSection({ wikiId, inboxExists, onUploaded }: { wikiId: string; in
       setBusy(false)
     }
   }, [wikiId, pasteFilename, pasteContent, onUploaded])
+
+  // If no inbox folder, show error message instead of upload UI
+  if (inboxExists === false) {
+    return (
+      <div className="px-2">
+        <div className="p-3 rounded-lg border border-[var(--error-border)] bg-[var(--error-faint)] text-xs text-[var(--error)] space-y-1">
+          <p className="font-medium">No raw/inbox/ folder</p>
+          <p className="text-[var(--error)]/70">Run <code className="bg-[var(--bg-base)] px-1 rounded">/create-wiki</code> in your IDE to set up the folder structure.</p>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="px-2">
