@@ -9,10 +9,42 @@ import fs from 'fs'
 import path from 'path'
 import { fileURLToPath } from 'url'
 import { randomUUID } from 'crypto'
-import { exec } from 'child_process'
+import { exec, execFile } from 'child_process'
 import { promisify } from 'util'
 
 const execAsync = promisify(exec)
+const execFileAsync = promisify(execFile)
+
+// ─── Security Helpers ─────────────────────────────────────────────────────────
+
+/** Validate that a resolved path is within the allowed base directory */
+function isPathWithinBase(filePath: string, baseDir: string): boolean {
+  const resolvedPath = path.resolve(filePath)
+  const resolvedBase = path.resolve(baseDir)
+  return resolvedPath.startsWith(resolvedBase + path.sep) || resolvedPath === resolvedBase
+}
+
+/** Sanitize a page ID to prevent directory traversal */
+function sanitizePageId(pageId: string): string {
+  // Remove any ../ sequences and leading slashes
+  return pageId
+    .split('/')
+    .filter(segment => segment !== '..' && segment !== '.' && segment !== '')
+    .join('/')
+}
+
+/** Allowed file extensions for upload */
+const ALLOWED_UPLOAD_EXTENSIONS = new Set([
+  '.md', '.txt', '.pdf', '.doc', '.docx', '.ppt', '.pptx',
+  '.xls', '.xlsx', '.csv', '.json', '.html', '.htm', '.xml',
+  '.rst', '.rtf', '.odt', '.epub', '.png', '.jpg', '.jpeg', '.gif', '.webp'
+])
+
+/** Max file size: 50MB */
+const MAX_FILE_SIZE = 50 * 1024 * 1024
+
+/** Max files per upload request */
+const MAX_FILES_PER_REQUEST = 20
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 // WIKI_DATA_DIR can be overridden in tests to use a temp directory
@@ -331,29 +363,35 @@ app.post('/api/open-in-ide', async (req, res) => {
   const { ide, path: folderPath } = req.body as { ide?: string; path?: string }
   if (!ide || !folderPath) return res.status(400).json({ error: 'ide and path are required' })
 
+  // Security: validate the path exists and is a directory
+  if (!fs.existsSync(folderPath) || !fs.statSync(folderPath).isDirectory()) {
+    return res.status(400).json({ error: 'Invalid folder path' })
+  }
+
   const def = IDE_DEFS.find((d) => d.id === ide)
   /* v8 ignore next */
   if (!def) return res.status(400).json({ error: `Unknown IDE: ${ide}` })
 
   /* v8 ignore start */
   try {
+    // Security: use execFile instead of execAsync to avoid shell injection
     if (process.platform === 'darwin') {
       const appExists = def.mac.apps.some((p) => fs.existsSync(p))
       if (appExists) {
-        await execAsync(`open -a "${def.mac.macAppName}" "${folderPath}"`)
+        await execFileAsync('open', ['-a', def.mac.macAppName, folderPath])
       } else {
-        await execAsync(`${def.mac.cli} "${folderPath}"`)
+        await execFileAsync(def.mac.cli, [folderPath])
       }
     } else if (process.platform === 'win32') {
       const exePath = findWinExe(def.win.exes)
         ?? (def.win.toolboxPrefix ? findJetBrainsExe(def.win.toolboxPrefix, def.win.toolboxExe!) : null)
       if (exePath) {
-        await execAsync(`"${exePath}" "${folderPath}"`)
+        await execFileAsync(exePath, [folderPath])
       } else {
-        await execAsync(`${def.win.cli} "${folderPath}"`)
+        await execFileAsync(def.win.cli, [folderPath])
       }
     } else {
-      await execAsync(`${def.linux.cli} "${folderPath}"`)
+      await execFileAsync(def.linux.cli, [folderPath])
     }
     res.json({ ok: true })
   } catch (err) {
@@ -518,9 +556,16 @@ app.get('/api/wikis/:id/wiki', (_req, res) => {
 
 app.get('/api/wikis/:id/wiki/*', (req, res) => {
   const v = res.locals.wiki as WikiConfig
-  const pageId = (req.params as Record<string, string>)['0']
+  const rawPageId = (req.params as Record<string, string>)['0']
+  const pageId = sanitizePageId(rawPageId)
   const baseDir = isWikiMode(v) ? wikiDir(v) : v.path
   const filePath = path.join(baseDir, pageId + '.md')
+
+  // Security: verify the resolved path is within the wiki directory
+  if (!isPathWithinBase(filePath, baseDir)) {
+    return res.status(400).json({ error: 'Invalid page path' })
+  }
+
   const raw = safeRead(filePath)
   if (!raw) return res.status(404).json({ error: 'Page not found' })
 
@@ -646,6 +691,16 @@ const storageFor = (inbox: string) => multer.diskStorage({
   filename: (_req, file, cb) => cb(null, file.originalname.replace(/[^a-zA-Z0-9._-]/g, '_')),
 })
 
+/** Security: validate file extension is in allowlist */
+const fileFilter: multer.Options['fileFilter'] = (_req, file, cb) => {
+  const ext = path.extname(file.originalname).toLowerCase()
+  if (ALLOWED_UPLOAD_EXTENSIONS.has(ext)) {
+    cb(null, true)
+  } else {
+    cb(new Error(`File type not allowed: ${ext}`))
+  }
+}
+
 app.post('/api/wikis/:id/raw/upload', (req, res) => {
   const v = res.locals.wiki as WikiConfig
   const inbox = inboxDir(v)
@@ -653,9 +708,23 @@ app.post('/api/wikis/:id/raw/upload', (req, res) => {
     return res.status(400).json({ error: NO_INBOX_ERROR })
   }
   const raw = rawDir(v)!
-  multer({ storage: storageFor(inbox) }).array('files')(req, res, (err) => {
+  const upload = multer({
+    storage: storageFor(inbox),
+    fileFilter,
+    limits: {
+      fileSize: MAX_FILE_SIZE,
+      files: MAX_FILES_PER_REQUEST,
+    },
+  })
+  upload.array('files', MAX_FILES_PER_REQUEST)(req, res, (err) => {
+    /* v8 ignore next 2 */
+    if (err instanceof multer.MulterError) {
+      if (err.code === 'LIMIT_FILE_SIZE') return res.status(400).json({ error: 'File too large (max 50MB)' })
+      if (err.code === 'LIMIT_FILE_COUNT') return res.status(400).json({ error: `Too many files (max ${MAX_FILES_PER_REQUEST})` })
+      return res.status(400).json({ error: err.message })
+    }
     /* v8 ignore next */
-    if (err) return res.status(500).json({ error: String(err) })
+    if (err) return res.status(400).json({ error: String(err) })
     /* v8 ignore next */
     const files = (req.files as Express.Multer.File[]) || []
     res.json({ uploaded: files.map((f) => ({ name: f.originalname, path: path.relative(raw, f.path).replace(/\\/g, '/'), size: f.size })) })
