@@ -16,11 +16,13 @@ import {
   Send,
   FileText,
   ClipboardCopy,
+  Sparkles,
 } from 'lucide-react'
 import { useSearch, useRawFiles, useWikis } from '../hooks/useWiki'
 import type { WikiPageMeta, SearchResult, PageType, RawFile } from '../types'
 import { PAGE_TYPE_COLORS } from '../types'
 import IDELaunchModal from './IDELaunchModal'
+import IngestStatus from './IngestStatus'
 
 interface SidebarProps {
   wikiId: string
@@ -566,6 +568,9 @@ export default function Sidebar({ wikiId, pages, mode = 'wiki' }: SidebarProps) 
             to={`/wiki/${wikiId}/log`}
             icon={<ScrollText size={14} />}
           />
+          {!isFolder && (
+            <NavItem label="AI Search" to={`/wiki/${wikiId}/search`} icon={<Sparkles size={15} />} />
+          )}
         </div>
       )}
 
@@ -586,6 +591,7 @@ export default function Sidebar({ wikiId, pages, mode = 'wiki' }: SidebarProps) 
           </div>
         </>
       )}
+      {!isFolder && <IngestStatus wikiId={wikiId} />}
     </div>
   )
 }

@@ -21,6 +21,16 @@ const DATA_DIR = process.env.WIKI_DATA_DIR ?? path.resolve(__dirname, '../data')
 const VAULTS_FILE = path.join(DATA_DIR, 'vaults.json')
 const WIKI_TEMPLATE_DIR = path.resolve(__dirname, '../wiki-template')
 
+// ─── Agent Service Proxy ──────────────────────────────────────────────────────
+const AGENT_URL = process.env.AGENT_SERVICE_URL ?? 'http://localhost:8000'
+
+async function proxyToAgent(agentPath: string, options?: RequestInit): Promise<Response> {
+  return fetch(`${AGENT_URL}${agentPath}`, {
+    ...options,
+    headers: { 'Content-Type': 'application/json', ...((options?.headers as Record<string, string>) ?? {}) },
+  })
+}
+
 // ─── Wiki Config ──────────────────────────────────────────────────────────────
 
 interface WikiConfig {
@@ -453,11 +463,17 @@ app.post('/api/wikis', (req, res) => {
   saveWikis(wikis)
 
   res.json({ ...wiki, stats: wikiStats(wiki) })
+  // Notify agent service (fire-and-forget — agent may not be running)
+  proxyToAgent(`/wikis/${wiki.id}/watch`, {
+    method: 'POST',
+    body: JSON.stringify({ id: wiki.id, name: wiki.name, path: absPath, color: wiki.color ?? '#89b4fa', createdAt: wiki.createdAt }),
+  }).catch(() => { /* agent not running */ })
 })
 
 app.delete('/api/wikis/:id', (req, res) => {
   const wikis = loadWikis().filter((v) => v.id !== req.params.id)
   saveWikis(wikis)
+  proxyToAgent(`/wikis/${req.params.id}`, { method: 'DELETE' }).catch(() => { /* agent not running */ })
   res.json({ ok: true })
 })
 
@@ -678,6 +694,73 @@ app.get('/api/wikis/:id/log', (_req, res) => {
     .map((p) => p.trim()).filter(Boolean)
     .map((p) => { const lines = p.split('\n'); return { header: lines[0].replace(/^## /, ''), body: lines.slice(1).join('\n').trim() } })
   res.json(entries)
+})
+
+// ─── AI Agent Routes ──────────────────────────────────────────────────────────
+
+// Incoming from agent service → broadcast to all WebSocket clients
+app.post('/api/ai/notify', (req, res) => {
+  const { event, data } = req.body as { event?: string; data?: unknown }
+  if (typeof event === 'string') broadcast(event, data ?? {})
+  res.json({ ok: true })
+})
+
+app.get('/api/ai/status', async (_req, res) => {
+  try {
+    const r = await proxyToAgent('/health')
+    res.status(r.status).json(await r.json())
+  } catch {
+    res.status(503).json({ status: 'unavailable', error: 'Agent service not running' })
+  }
+})
+
+app.post('/api/ai/search', async (req, res) => {
+  try {
+    const r = await proxyToAgent('/search', { method: 'POST', body: JSON.stringify(req.body) })
+    res.status(r.status).json(await r.json())
+  } catch {
+    res.status(503).json({ error: 'Agent service not running' })
+  }
+})
+
+app.post('/api/ai/ingest', async (req, res) => {
+  try {
+    const r = await proxyToAgent('/ingest', { method: 'POST', body: JSON.stringify(req.body) })
+    res.status(r.status).json(await r.json())
+  } catch {
+    res.status(503).json({ error: 'Agent service not running' })
+  }
+})
+
+app.get('/api/ai/queue', async (_req, res) => {
+  try {
+    const r = await proxyToAgent('/ingest/queue')
+    res.status(r.status).json(await r.json())
+  } catch {
+    res.status(503).json({ error: 'Agent service not running' })
+  }
+})
+
+app.post('/api/ai/wiki/generate', async (req, res) => {
+  try {
+    const r = await proxyToAgent('/wiki/generate', { method: 'POST', body: JSON.stringify(req.body) })
+    res.status(r.status).json(await r.json())
+  } catch {
+    res.status(503).json({ error: 'Agent service not running' })
+  }
+})
+
+app.post('/api/ai/wikis/:wikiId/reindex', async (req, res) => {
+  try {
+    const includeWikiPages = req.query.include_wiki_pages !== 'false'
+    const r = await proxyToAgent(
+      `/wikis/${req.params.wikiId}/reindex?include_wiki_pages=${includeWikiPages}`,
+      { method: 'POST' }
+    )
+    res.status(r.status).json(await r.json())
+  } catch {
+    res.status(503).json({ error: 'Agent service not running' })
+  }
 })
 
 // ─── HTTP + WebSocket ─────────────────────────────────────────────────────────

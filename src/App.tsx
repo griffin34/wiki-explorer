@@ -4,6 +4,7 @@ import Layout from './components/Layout'
 import WikiPage from './components/WikiPage'
 import GraphView from './components/GraphView'
 import LogView from './components/LogView'
+import AISearch from './components/AISearch'
 
 function WikiIndexRedirect() {
   const { wikiId } = useParams<{ wikiId: string }>()
@@ -23,6 +24,7 @@ export default function App() {
           <Route path="page/*" element={<WikiPage />} />
           <Route path="graph" element={<GraphView />} />
           <Route path="log" element={<LogView />} />
+          <Route path="search" element={<AISearch />} />
         </Route>
       </Routes>
     </BrowserRouter>

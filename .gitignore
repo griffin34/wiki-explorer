@@ -3,6 +3,7 @@ node_modules/
 
 # Build output
 dist/
+coverage/
 
 # Wiki data (local registry — paths are machine-specific)
 data/
@@ -13,3 +14,7 @@ data/
 # Env / secrets
 .env
 .env.*
+# AI agent runtime
+.ai-logs/
+agents/.venv/
+__pycache__/
