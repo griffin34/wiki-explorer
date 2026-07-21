@@ -2,6 +2,7 @@
   "name": "wiki-explorer-ui",
   "version": "1.0.0",
   "type": "module",
+  "main": "electron/main.js",
   "scripts": {
     "dev": "concurrently -n server,ui -c cyan,magenta \"npm run dev:server\" \"npm run dev:ui\"",
     "dev:server": "cross-env NODE_ENV=development node --import tsx server/index.ts",
@@ -10,7 +11,12 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage",
+    "electron:dev": "concurrently -n server,ui,electron -c cyan,magenta,yellow \"npm run dev:server\" \"npm run dev:ui\" \"npm run electron:start\"",
+    "electron:start": "tsc -p tsconfig.electron.json && electron .",
+    "electron:build": "npm run build && tsc -p tsconfig.electron.json && electron-builder",
+    "electron:build:mac": "npm run electron:build -- --mac",
+    "electron:build:win": "npm run electron:build -- --win"
   },
   "dependencies": {
     "chokidar": "^3.5.3",
@@ -49,6 +55,8 @@
     "autoprefixer": "^10.4.17",
     "concurrently": "^8.2.2",
     "cross-env": "^10.1.0",
+    "electron": "^43.1.1",
+    "electron-builder": "^26.15.3",
     "happy-dom": "^20.9.0",
     "postcss": "^8.4.35",
     "supertest": "^7.2.2",

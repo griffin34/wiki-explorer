@@ -1,0 +1,75 @@
+appId: com.wiki-explorer.app
+productName: Wiki Explorer
+copyright: Copyright © 2024
+
+directories:
+  output: release
+  buildResources: build
+
+files:
+  - dist/**/*
+  - electron/**/*.js
+  - electron/**/*.js.map
+  - server/**/*.js
+  - server/**/*.js.map
+  - data/**/*
+  - wiki-template/**/*
+  - package.json
+  - "!**/node_modules/*/{CHANGELOG.md,README.md,README,readme.md,readme}"
+  - "!**/node_modules/*/{test,__tests__,tests,powered-test,example,examples}"
+  - "!**/node_modules/.bin"
+  - "!**/*.{iml,o,hprof,orig,pyc,pyo,rbc,swp,csproj,sln,xproj}"
+
+mac:
+  category: public.app-category.productivity
+  target:
+    - target: dmg
+      arch: [universal]
+    - target: zip
+      arch: [universal]
+  icon: build/icon.icns
+  darkModeSupport: true
+  hardenedRuntime: true
+  gatekeeperAssess: false
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.plist
+
+dmg:
+  artifactName: "${productName}-${version}-${arch}.${ext}"
+  contents:
+    - x: 130
+      y: 220
+    - x: 410
+      y: 220
+      type: link
+      path: /Applications
+
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+  icon: build/icon.ico
+
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  artifactName: "${productName}-Setup-${version}.${ext}"
+
+linux:
+  target:
+    - target: AppImage
+      arch: [x64]
+    - target: deb
+      arch: [x64]
+  category: Office
+  icon: build/icons
+
+# Don't publish to any update server by default
+publish: null
+
+# Extra resources to include
+extraResources:
+  - from: wiki-template
+    to: wiki-template
+    filter:
+      - "**/*"
