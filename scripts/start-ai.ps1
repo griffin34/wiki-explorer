@@ -9,9 +9,9 @@
 #
 # Usage:
 #   Right-click → "Run with PowerShell"
-#   or:  powershell -ExecutionPolicy Bypass -File .\start-ai.ps1
+#   or:  powershell -ExecutionPolicy Bypass -File .\scripts\start-ai.ps1
 #
-# macOS/Linux users: use ./start-ai.sh instead
+# macOS/Linux users: use ./scripts/start-ai.sh instead
 # ─────────────────────────────────────────────────────────────────────────────
 #Requires -Version 5.1
 param(
@@ -20,9 +20,11 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$ScriptDir  = Split-Path -Parent $MyInvocation.MyCommand.Path
-$AgentsDir  = Join-Path $ScriptDir "agents"
-$LogDir     = Join-Path $ScriptDir ".ai-logs"
+# Navigate to project root (script is in scripts/)
+$ProjectDir = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
+Set-Location $ProjectDir
+$AgentsDir  = Join-Path $ProjectDir "agents"
+$LogDir     = Join-Path $ProjectDir ".ai-logs"
 $null       = New-Item -ItemType Directory -Force -Path $LogDir
 
 function Write-Info    { param($msg) Write-Host "[wiki-ai] $msg" -ForegroundColor Cyan   }
@@ -167,8 +169,8 @@ Write-Success "Ollama ready"
 
 # ─── 4. npm install (wiki-explorer deps) ─────────────────────────────────────
 Write-Info "Installing Node.js dependencies..."
-Set-Location $ScriptDir
-if (-not (Test-Path (Join-Path $ScriptDir 'node_modules'))) {
+Set-Location $ProjectDir
+if (-not (Test-Path (Join-Path $ProjectDir 'node_modules'))) {
     npm install --silent
 }
 
@@ -209,7 +211,7 @@ if (Test-PortListening 8001) {
         -ArgumentList "run --host 0.0.0.0 --port 8001 --path `"$chromaDb`"" `
         -RedirectStandardOutput $chromaLog `
         -RedirectStandardError  "$chromaLog.err" `
-        -PassThru -NoNewWindow -WorkingDirectory $ScriptDir
+        -PassThru -NoNewWindow -WorkingDirectory $ProjectDir
     $SpawnedProcs.Add($chromaProc)
 
     if (-not (Wait-ForPort 8001 15 "ChromaDB")) {
@@ -275,10 +277,10 @@ Write-Success "Agent service running (PID $($agentProc.Id))"
 
 # ─── 9. wiki-explorer ────────────────────────────────────────────────────────
 Write-Info "Starting wiki-explorer..."
-Set-Location $ScriptDir
+Set-Location $ProjectDir
 $wikiProc = Start-Process -FilePath "npm" `
     -ArgumentList "run dev" `
-    -PassThru -NoNewWindow -WorkingDirectory $ScriptDir
+    -PassThru -NoNewWindow -WorkingDirectory $ProjectDir
 $SpawnedProcs.Add($wikiProc)
 
 Start-Sleep 3

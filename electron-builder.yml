@@ -3,7 +3,7 @@ productName: Wiki Explorer
 copyright: Copyright © 2024
 
 directories:
-  output: release
+  output: app
   buildResources: build
 
 files:

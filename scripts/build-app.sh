@@ -3,6 +3,9 @@
 
 set -e
 
+# Navigate to project root (script is in scripts/)
+cd "$(dirname "$0")/.."
+
 echo "🔨 Building Wiki Explorer for macOS..."
 
 # Check for Node.js
@@ -44,14 +47,14 @@ npm run electron:build:mac
 
 # Clean up build artifacts
 echo "🧹 Cleaning up build artifacts..."
-cd release
+cd app
 rm -rf .icon-icns mac-universal *.blockmap builder-debug.yml builder-effective-config.yaml 2>/dev/null
 cd ..
 
 echo ""
 echo "✅ Build complete!"
 echo ""
-echo "📁 Output files in release/:"
-ls -lh release/*.dmg release/*.zip 2>/dev/null || echo "   (check release/ folder)"
+echo "📁 Output files in app/:"
+ls -lh app/*.dmg app/*.zip 2>/dev/null || echo "   (check app/ folder)"
 echo ""
 echo "To install: Open the .dmg file and drag Wiki Explorer to Applications"

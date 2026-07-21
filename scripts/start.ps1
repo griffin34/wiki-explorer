@@ -1,13 +1,15 @@
 # ─────────────────────────────────────────────────────────────────────────────
 # start.ps1  —  Install deps and launch Wiki Explorer (Windows)
 # Usage:  Right-click → "Run with PowerShell"
-#         or in a terminal:  powershell -ExecutionPolicy Bypass -File .\start.ps1
+#         or in a terminal:  powershell -ExecutionPolicy Bypass -File .\scripts\start.ps1
 # ─────────────────────────────────────────────────────────────────────────────
 #Requires -Version 5.1
 param()
 
 $ErrorActionPreference = "Stop"
-$ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+# Navigate to project root (script is in scripts/)
+$ScriptDir = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
+Set-Location $ScriptDir
 $UI_URL    = "http://localhost:5173"
 
 function Write-Green  { param($msg) Write-Host $msg -ForegroundColor Green  }

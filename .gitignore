@@ -4,7 +4,8 @@ node_modules/
 # Build output
 dist/
 coverage/
-release/
+app/
+*.tsbuildinfo
 
 # Electron compiled output (keep source .ts files)
 electron/*.js

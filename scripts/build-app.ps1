@@ -2,6 +2,9 @@
 
 $ErrorActionPreference = "Stop"
 
+# Navigate to project root (script is in scripts/)
+Set-Location (Split-Path -Parent $PSScriptRoot)
+
 Write-Host "🔨 Building Wiki Explorer for Windows..." -ForegroundColor Cyan
 
 # Check for Node.js
@@ -41,15 +44,15 @@ npm run electron:build:win
 
 # Clean up build artifacts
 Write-Host "🧹 Cleaning up build artifacts..." -ForegroundColor Yellow
-Remove-Item -Recurse -Force release\win-unpacked -ErrorAction SilentlyContinue
-Remove-Item -Force release\*.blockmap -ErrorAction SilentlyContinue
-Remove-Item -Force release\builder-debug.yml -ErrorAction SilentlyContinue
-Remove-Item -Force release\builder-effective-config.yaml -ErrorAction SilentlyContinue
+Remove-Item -Recurse -Force app\win-unpacked -ErrorAction SilentlyContinue
+Remove-Item -Force app\*.blockmap -ErrorAction SilentlyContinue
+Remove-Item -Force app\builder-debug.yml -ErrorAction SilentlyContinue
+Remove-Item -Force app\builder-effective-config.yaml -ErrorAction SilentlyContinue
 
 Write-Host ""
 Write-Host "✅ Build complete!" -ForegroundColor Green
 Write-Host ""
-Write-Host "📁 Output files in release/:" -ForegroundColor Cyan
-Get-ChildItem release\*.exe 2>$null | ForEach-Object { Write-Host "   $($_.Name)" }
+Write-Host "📁 Output files in app/:" -ForegroundColor Cyan
+Get-ChildItem app\*.exe 2>$null | ForEach-Object { Write-Host "   $($_.Name)" }
 Write-Host ""
 Write-Host "To install: Run the Setup .exe installer"

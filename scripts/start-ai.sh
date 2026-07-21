@@ -8,13 +8,15 @@
 #   3. Python agent service  (port 8000)
 #   4. wiki-explorer         (Express 3001 + Vite 5173)
 #
-# Windows users: powershell -ExecutionPolicy Bypass -File .\start-ai.ps1
+# Windows users: powershell -ExecutionPolicy Bypass -File .\scripts\start-ai.ps1
 # ─────────────────────────────────────────────────────────────────────────────
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-AGENTS_DIR="$SCRIPT_DIR/agents"
-LOG_DIR="$SCRIPT_DIR/.ai-logs"
+# Navigate to project root (script is in scripts/)
+PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$PROJECT_DIR"
+AGENTS_DIR="$PROJECT_DIR/agents"
+LOG_DIR="$PROJECT_DIR/.ai-logs"
 mkdir -p "$LOG_DIR"
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; CYAN='\033[0;36m'; NC='\033[0m'
@@ -97,7 +99,7 @@ fi
 success "Ollama $(ollama --version 2>/dev/null | head -1)"
 
 # ─── 4. npm install (wiki-explorer deps) ─────────────────────────────────────
-cd "$SCRIPT_DIR"
+cd "$PROJECT_DIR"
 if [ ! -d node_modules ]; then
   info "Installing Node.js dependencies..."
   npm install --silent
@@ -127,7 +129,7 @@ if [ ! -f ".env" ] && [ -f ".env.example" ]; then
   cp .env.example .env
   info "Created agents/.env from .env.example"
 fi
-cd "$SCRIPT_DIR"
+cd "$PROJECT_DIR"
 
 # ─── Stop previous AI processes on our ports ─────────────────────────────────
 stop_ai_port() {
@@ -230,7 +232,7 @@ fi
 
 # ─── 9. wiki-explorer ────────────────────────────────────────────────────────
 info "Starting wiki-explorer..."
-cd "$SCRIPT_DIR"
+cd "$PROJECT_DIR"
 npm run dev >"$LOG_DIR/wiki.log" 2>&1 &
 PIDS+=($!)
 

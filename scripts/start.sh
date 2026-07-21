@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
 # ─────────────────────────────────────────────────────────────────────────────
 # start.sh  —  Install deps and launch Wiki Explorer (macOS / Linux)
-# Usage:  bash start.sh
+# Usage:  bash scripts/start.sh   OR   ./scripts/start.sh
 # ─────────────────────────────────────────────────────────────────────────────
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Navigate to project root (script is in scripts/)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$SCRIPT_DIR"
 UI_URL="http://localhost:5173"
 
 # ── Colour helpers ────────────────────────────────────────────────────────────
