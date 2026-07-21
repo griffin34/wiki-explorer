@@ -7,6 +7,7 @@ import IDELaunchModal, { writeToClipboard, IDE_CREATE_COMMANDS } from './IDELaun
 vi.mock('../hooks/useWiki', () => ({
   detectIDEs: vi.fn(),
   openInIDE: vi.fn(),
+  useWikiSocket: vi.fn(),
 }))
 import { detectIDEs, openInIDE } from '../hooks/useWiki'
 

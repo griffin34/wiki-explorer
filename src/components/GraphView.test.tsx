@@ -6,6 +6,7 @@ import GraphView from './GraphView'
 
 vi.mock('../hooks/useWiki', () => ({
   useGraphData: vi.fn(),
+  useWikiSocket: vi.fn(),
 }))
 import { useGraphData } from '../hooks/useWiki'
 

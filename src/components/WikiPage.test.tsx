@@ -6,6 +6,7 @@ import WikiPage from './WikiPage'
 
 vi.mock('../hooks/useWiki', () => ({
   useWikiPage: vi.fn(),
+  useWikiSocket: vi.fn(),
 }))
 import { useWikiPage } from '../hooks/useWiki'
 

@@ -43,15 +43,32 @@ function makeDT({
   files = [] as File[],
   items = [] as DataTransferItem[],
   plain = '',
+  html = '',
+  email = '',
+  types = [] as string[],
 }: {
   files?: File[]
   items?: DataTransferItem[]
   plain?: string
+  html?: string
+  email?: string
+  types?: string[]
 }): DataTransfer {
+  const allTypes = [...types]
+  if (plain && !allTypes.includes('text/plain')) allTypes.push('text/plain')
+  if (html && !allTypes.includes('text/html')) allTypes.push('text/html')
+  if (email && !allTypes.includes('message/rfc822')) allTypes.push('message/rfc822')
+  
   return {
     files: { length: files.length, item: (i: number) => files[i], [Symbol.iterator]: files[Symbol.iterator].bind(files) } as unknown as FileList,
     items: { length: items.length, [Symbol.iterator]: items[Symbol.iterator].bind(items) } as unknown as DataTransferItemList,
-    getData: (type: string) => (type === 'text/plain' ? plain : ''),
+    types: allTypes,
+    getData: (type: string) => {
+      if (type === 'text/plain') return plain
+      if (type === 'text/html') return html
+      if (type === 'message/rfc822') return email
+      return ''
+    },
     // other members not needed by our code
   } as unknown as DataTransfer
 }
@@ -98,17 +115,38 @@ describe('snapshotDrop', () => {
     expect(snap.plainText).toBe('Hello from Outlook')
   })
 
-  it('returns empty plainText when getData throws', () => {
+  it('captures HTML text from getData', () => {
+    const dt = makeDT({ html: '<p>Hello from Outlook</p>' })
+    const snap = snapshotDrop(dt)
+    expect(snap.htmlText).toBe('<p>Hello from Outlook</p>')
+  })
+
+  it('captures email data from message/rfc822', () => {
+    const dt = makeDT({ email: 'From: test@example.com\r\nSubject: Test' })
+    const snap = snapshotDrop(dt)
+    expect(snap.emailData).toBe('From: test@example.com\r\nSubject: Test')
+  })
+
+  it('captures available types', () => {
+    const dt = makeDT({ plain: 'text', html: '<p>html</p>', types: ['text/plain', 'text/html'] })
+    const snap = snapshotDrop(dt)
+    expect(snap.availableTypes).toContain('text/plain')
+    expect(snap.availableTypes).toContain('text/html')
+  })
+
+  it('returns empty strings when getData throws', () => {
     const dt = { ...makeDT({}), getData: () => { throw new Error('not allowed') } } as unknown as DataTransfer
     const snap = snapshotDrop(dt)
     expect(snap.plainText).toBe('')
+    expect(snap.htmlText).toBe('')
+    expect(snap.emailData).toBe('')
   })
 })
 
 // ── resolveDropSnapshot ───────────────────────────────────────────────────────
 
 describe('resolveDropSnapshot', () => {
-  const empty: DropSnapshot = { stdFiles: [], itemFiles: [], entries: [], plainText: '' }
+  const empty: DropSnapshot = { stdFiles: [], itemFiles: [], entries: [], plainText: '', htmlText: '', emailData: '', availableTypes: [] }
 
   it('returns stdFiles when present (highest priority)', async () => {
     const f = makeFile('doc.pdf')
@@ -152,8 +190,35 @@ describe('resolveDropSnapshot', () => {
     expect(text).toBe('Meeting notes from Outlook')
   })
 
-  it('ignores whitespace-only plainText', async () => {
-    const snap: DropSnapshot = { ...empty, plainText: '   \n\t  ' }
+  it('generates .eml file when HTML content is available', async () => {
+    const snap: DropSnapshot = { 
+      ...empty, 
+      plainText: 'Plain text version', 
+      htmlText: '<html><body>HTML version</body></html>' 
+    }
+    const result = await resolveDropSnapshot(snap)
+    expect(result).toHaveLength(1)
+    expect(result[0].name).toMatch(/\.eml$/)
+    expect(result[0].type).toBe('message/rfc822')
+    const content = await result[0].text()
+    expect(content).toContain('multipart/alternative')
+    expect(content).toContain('Plain text version')
+    expect(content).toContain('HTML version')
+  })
+
+  it('uses raw emailData when available', async () => {
+    const emlContent = 'From: test@example.com\r\nSubject: Test\r\n\r\nBody'
+    const snap: DropSnapshot = { ...empty, emailData: emlContent }
+    const result = await resolveDropSnapshot(snap)
+    expect(result).toHaveLength(1)
+    expect(result[0].name).toMatch(/^email-.*\.eml$/)
+    expect(result[0].type).toBe('message/rfc822')
+    const text = await result[0].text()
+    expect(text).toBe(emlContent)
+  })
+
+  it('ignores whitespace-only plainText and htmlText', async () => {
+    const snap: DropSnapshot = { ...empty, plainText: '   \n\t  ', htmlText: '  ' }
     const result = await resolveDropSnapshot(snap)
     expect(result).toHaveLength(0)
   })

@@ -9,6 +9,7 @@ vi.mock('../hooks/useWiki', () => ({
   useSearch: vi.fn(),
   useRawFiles: vi.fn(),
   useWikis: vi.fn(),
+  useWikiSocket: vi.fn(),
 }))
 vi.mock('./IDELaunchModal', () => ({
   default: ({ onClose }: { onClose: () => void }) => (
@@ -16,7 +17,15 @@ vi.mock('./IDELaunchModal', () => ({
   ),
 }))
 vi.mock('../utils/dragDrop', () => ({
-  snapshotDrop: vi.fn(() => ({ files: [], items: [], entries: [], text: '' })),
+  snapshotDrop: vi.fn(() => ({
+    stdFiles: [],
+    itemFiles: [],
+    entries: [],
+    plainText: '',
+    htmlText: '',
+    emailData: '',
+    availableTypes: [],
+  })),
   resolveDropSnapshot: vi.fn(() => Promise.resolve([])),
 }))
 import { useSearch, useRawFiles, useWikis } from '../hooks/useWiki'
@@ -424,27 +433,46 @@ describe('InboxSection', () => {
     expect(screen.getByText(/inbox/i)).toBeInTheDocument()
   })
 
-  it('opens IDELaunchModal when ingest button is clicked', async () => {
+  it('calls AI agent API when ingest button is clicked', async () => {
     vi.mocked(useRawFiles).mockReturnValue({
       ...defaultRawFiles,
       files: [{ name: 'source.pdf', path: 'inbox/source.pdf', size: 2048, modified: '' }],
     })
+    const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue({
+      ok: true,
+      json: async () => ({ ok: true, queued: '/path/to/file' }),
+    } as Response)
+    
     renderSidebar()
-    const ingestBtn = screen.getByTitle(/open in editor/i)
+    const ingestBtn = screen.getByTitle(/process with ai/i)
     await userEvent.click(ingestBtn)
-    expect(screen.getByTestId('ide-modal')).toBeInTheDocument()
+    
+    expect(fetchSpy).toHaveBeenCalledWith(
+      'http://localhost:8000/ingest',
+      expect.objectContaining({
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      })
+    )
+    fetchSpy.mockRestore()
   })
 
-  it('closes the IDELaunchModal when onClose is called', async () => {
+  it('shows success message after ingestion', async () => {
     vi.mocked(useRawFiles).mockReturnValue({
       ...defaultRawFiles,
       files: [{ name: 'source.pdf', path: 'inbox/source.pdf', size: 2048, modified: '' }],
     })
+    const fetchSpy = vi.spyOn(global, 'fetch').mockResolvedValue({
+      ok: true,
+      json: async () => ({ ok: true, queued: '/path/to/file' }),
+    } as Response)
+    
     renderSidebar()
-    const ingestBtn = screen.getByTitle(/open in editor/i)
+    const ingestBtn = screen.getByTitle(/process with ai/i)
     await userEvent.click(ingestBtn)
-    await userEvent.click(screen.getByText('Close IDE modal'))
-    expect(screen.queryByTestId('ide-modal')).not.toBeInTheDocument()
+    
+    expect(await screen.findByText(/queued for processing/i)).toBeInTheDocument()
+    fetchSpy.mockRestore()
   })
 
   it('calls reload when refresh button is clicked', async () => {

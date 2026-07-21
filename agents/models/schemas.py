@@ -58,3 +58,38 @@ class HealthStatus(BaseModel):
     chroma: str
     watchers: int
     wikis: int
+
+
+# Wiki setup (create-wiki workflow)
+
+class ProposedFolder(BaseModel):
+    name: str
+    description: str
+
+
+class WikiSetupProposeRequest(BaseModel):
+    wiki_name: str
+    topics: list[str]
+    source_types: list[str]
+
+
+class WikiSetupProposeResponse(BaseModel):
+    wiki_name: str
+    summary: str
+    folders: list[ProposedFolder]
+
+
+class WikiSetupCreateRequest(BaseModel):
+    wiki_name: str
+    wiki_path: str  # Parent directory where wiki folder will be created
+    topics: list[str]
+    source_types: list[str]
+    folders: list[ProposedFolder]
+    color: str = "#89b4fa"
+
+
+class WikiSetupCreateResponse(BaseModel):
+    ok: bool
+    wiki_id: str
+    wiki_path: str
+    files_created: list[str]

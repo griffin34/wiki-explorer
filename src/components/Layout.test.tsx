@@ -3,6 +3,7 @@ import { screen, waitFor, act } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { renderWithRouter } from '../test-utils'
 import Layout from './Layout'
+import type { WsEvent } from '../types'
 
 vi.mock('../hooks/useWiki', () => ({
   usePageList: vi.fn(),
@@ -76,34 +77,40 @@ describe('Layout', () => {
     expect(screen.getByTestId('sidebar').dataset.mode).toBe('folder')
   })
 
-  it('calls reloadPages when WebSocket event arrives for this wiki', () => {
+  it('calls reloadPages when WebSocket event arrives for this wiki', async () => {
     const reload = vi.fn()
     vi.mocked(usePageList).mockReturnValue({ pages: [], loading: false, reload })
+    let capturedHandler: ((e: WsEvent) => void) | undefined
     vi.mocked(useWikiSocket).mockImplementation((handler) => {
-      // Simulate an event for w1
-      act(() => { handler({ data: { wikiId: 'w1' } } as never) })
+      capturedHandler = handler
     })
     renderWithRouter(<Layout />, { route: '/wiki/w1', path: '/wiki/:wikiId' })
+    // Call the handler after render completes
+    act(() => { capturedHandler?.({ data: { wikiId: 'w1' } } as never) })
     expect(reload).toHaveBeenCalled()
   })
 
   it('does not call reloadPages for a different wikiId in WS event', () => {
     const reload = vi.fn()
     vi.mocked(usePageList).mockReturnValue({ pages: [], loading: false, reload })
+    let capturedHandler: ((e: WsEvent) => void) | undefined
     vi.mocked(useWikiSocket).mockImplementation((handler) => {
-      act(() => { handler({ data: { wikiId: 'other' } } as never) })
+      capturedHandler = handler
     })
     renderWithRouter(<Layout />, { route: '/wiki/w1', path: '/wiki/:wikiId' })
+    act(() => { capturedHandler?.({ data: { wikiId: 'other' } } as never) })
     expect(reload).not.toHaveBeenCalled()
   })
 
   it('does not call reloadPages for WS events without wikiId', () => {
     const reload = vi.fn()
     vi.mocked(usePageList).mockReturnValue({ pages: [], loading: false, reload })
+    let capturedHandler: ((e: WsEvent) => void) | undefined
     vi.mocked(useWikiSocket).mockImplementation((handler) => {
-      act(() => { handler({ data: {} } as never) })
+      capturedHandler = handler
     })
     renderWithRouter(<Layout />, { route: '/wiki/w1', path: '/wiki/:wikiId' })
+    act(() => { capturedHandler?.({ data: {} } as never) })
     expect(reload).not.toHaveBeenCalled()
   })
 

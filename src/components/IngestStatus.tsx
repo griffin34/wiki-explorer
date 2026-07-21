@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Loader2, CheckCircle2, XCircle, FileText, Brain } from 'lucide-react'
+import { Loader2, CheckCircle2, XCircle, FileText, Brain, Wifi, WifiOff } from 'lucide-react'
 import { useWikiSocket } from '../hooks/useWiki'
 import type { WsEvent } from '../types'
 
@@ -20,6 +20,28 @@ export default function IngestStatus({ wikiId }: Props) {
   const navigate = useNavigate()
   const [items, setItems] = useState<IngestItem[]>([])
   const [newPageToast, setNewPageToast] = useState<{ title: string; page: string } | null>(null)
+  const [aiStatus, setAiStatus] = useState<'checking' | 'online' | 'offline'>('checking')
+  const [recentCount, setRecentCount] = useState(0)
+
+  // Check AI service health periodically
+  useEffect(() => {
+    async function checkHealth() {
+      try {
+        const res = await fetch('/api/ai/status')
+        if (res.ok) {
+          const data = await res.json()
+          setAiStatus(data.status === 'ok' || data.status === 'degraded' ? 'online' : 'offline')
+        } else {
+          setAiStatus('offline')
+        }
+      } catch {
+        setAiStatus('offline')
+      }
+    }
+    checkHealth()
+    const interval = setInterval(checkHealth, 30000) // Check every 30s
+    return () => clearInterval(interval)
+  }, [])
 
   const handleEvent = useCallback(
     (e: WsEvent) => {
@@ -42,6 +64,7 @@ export default function IngestStatus({ wikiId }: Props) {
               : i
           )
         )
+        setRecentCount((c) => c + 1)
       } else if (e.event === 'ai:ingest:error' && e.data.wikiId === wikiId) {
         setItems((prev) =>
           prev.map((i) =>
@@ -52,7 +75,7 @@ export default function IngestStatus({ wikiId }: Props) {
         )
       } else if (e.event === 'ai:wiki:created' && e.data.wikiId === wikiId) {
         setNewPageToast({ title: e.data.title, page: e.data.page })
-        setTimeout(() => setNewPageToast(null), 5000)
+        setTimeout(() => setNewPageToast(null), 8000)
       }
     },
     [wikiId]
@@ -60,39 +83,65 @@ export default function IngestStatus({ wikiId }: Props) {
 
   useWikiSocket(handleEvent)
 
-  // Auto-remove done/error items after 10 seconds
+  // Auto-remove done/error items after 15 seconds (longer so user sees them)
   useEffect(() => {
     if (!items.length) return
     const timer = setInterval(() => {
-      const cutoff = Date.now() - 10_000
+      const cutoff = Date.now() - 15_000
       setItems((prev) => prev.filter((i) => i.status === 'processing' || i.ts > cutoff))
     }, 1000)
     return () => clearInterval(timer)
   }, [items.length])
 
-  if (!items.length && !newPageToast) return null
+  // Reset recent count after 60 seconds of no activity
+  useEffect(() => {
+    if (recentCount === 0) return
+    const timer = setTimeout(() => setRecentCount(0), 60000)
+    return () => clearTimeout(timer)
+  }, [recentCount])
 
   const activeCount = items.filter((i) => i.status === 'processing').length
-  const allDone = items.length > 0 && activeCount === 0
 
   return (
     <div className="border-t border-[var(--border)] py-2">
-      {/* Section header */}
+      {/* Section header - always visible */}
       <div className="flex items-center gap-2 px-4 pb-1.5">
         <Brain size={12} className="text-[var(--text-muted)]" />
         <p className="text-xs font-semibold text-[var(--text-muted)] uppercase tracking-wider flex-1">
           AI Processing
         </p>
         {activeCount > 0 ? (
-          <Loader2 size={12} className="text-[var(--accent)] animate-spin" />
-        ) : allDone ? (
-          <CheckCircle2 size={12} className="text-[var(--success,#a6e3a1)]" />
-        ) : null}
+          <div className="flex items-center gap-1.5">
+            <span className="text-[10px] text-[var(--accent)]">{activeCount} file{activeCount > 1 ? 's' : ''}</span>
+            <Loader2 size={12} className="text-[var(--accent)] animate-spin" />
+          </div>
+        ) : aiStatus === 'checking' ? (
+          <Loader2 size={12} className="text-[var(--text-muted)] animate-spin" />
+        ) : aiStatus === 'online' ? (
+          <div className="flex items-center gap-1">
+            {recentCount > 0 && (
+              <span className="text-[10px] text-[var(--success,#a6e3a1)]">{recentCount} processed</span>
+            )}
+            <Wifi size={12} className="text-[var(--success,#a6e3a1)]" />
+          </div>
+        ) : (
+          <div className="flex items-center gap-1" title="AI service offline - run ./start-ai.sh">
+            <span className="text-[10px] text-[var(--text-muted)]">offline</span>
+            <WifiOff size={12} className="text-[var(--text-muted)]" />
+          </div>
+        )}
       </div>
+
+      {/* Offline hint */}
+      {aiStatus === 'offline' && !items.length && (
+        <div className="mx-2 px-2.5 py-1.5 rounded bg-[var(--bg-elevated)] text-[10px] text-[var(--text-muted)]">
+          Start AI with <code className="bg-[var(--bg-base)] px-1 rounded">./start-ai.sh</code>
+        </div>
+      )}
 
       {/* New wiki page toast */}
       {newPageToast && (
-        <div className="mx-2 mb-1.5 px-2.5 py-1.5 rounded bg-[var(--accent-faint)] border border-[var(--accent-border)] text-xs text-[var(--accent)]">
+        <div className="mx-2 mb-1.5 px-2.5 py-1.5 rounded bg-[var(--accent-faint)] border border-[var(--accent-border)] text-xs text-[var(--accent)] animate-pulse">
           ✦ New page created:{' '}
           <button
             onClick={() => navigate(`/wiki/${wikiId}/page/${newPageToast.page}`)}

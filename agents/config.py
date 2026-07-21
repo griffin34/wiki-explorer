@@ -32,8 +32,8 @@ class Settings(BaseSettings):
         return Path(v) if v else Path(__file__).parent.parent / "data" / "vaults.json"
 
     # Ingestion
-    chunk_size: int = 512
-    chunk_overlap: int = 64
+    chunk_size: int = 400  # words per chunk (conservative for nomic-embed-text 2048 token limit)
+    chunk_overlap: int = 50
 
     # Wiki generation
     wiki_auto_generate: bool = True

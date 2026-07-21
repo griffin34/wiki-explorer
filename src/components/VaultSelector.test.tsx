@@ -12,6 +12,7 @@ vi.mock('../hooks/useWiki', () => ({
   pickFolder: vi.fn(),
   detectIDEs: vi.fn(),
   openInIDE: vi.fn(),
+  useWikiSocket: vi.fn(),
 }))
 import { useWikis, addWiki, removeWiki, pickFolder, detectIDEs, openInIDE } from '../hooks/useWiki'
 
@@ -136,18 +137,24 @@ describe('AddWikiModal', () => {
 
   async function openModal() {
     renderWithRouter(<VaultSelector />, { route: '/', path: '/' })
+    // First click opens the choice modal
     await userEvent.click(screen.getAllByText(/add.*wiki/i)[0])
   }
 
-  it('renders modal with create/existing mode toggle', async () => {
+  async function openExistingFolderModal() {
     await openModal()
-    expect(screen.getByText('Create new wiki')).toBeInTheDocument()
-    expect(screen.getByText('Open existing folder')).toBeInTheDocument()
+    // Then click "Add existing folder" to get the old modal
+    await userEvent.click(screen.getByText('Add existing folder'))
+  }
+
+  it('renders choice modal with create and existing options', async () => {
+    await openModal()
+    expect(screen.getByText('Create with AI')).toBeInTheDocument()
+    expect(screen.getByText('Add existing folder')).toBeInTheDocument()
   })
 
-  it('closes modal when X is clicked', async () => {
+  it('closes choice modal when X is clicked', async () => {
     await openModal()
-    // The X button sits in the modal header, next to the "Add a wiki" heading
     const heading = screen.getByText('Add a wiki')
     const headerDiv = heading.closest('div')!
     const closeBtn = headerDiv.querySelector('button') as HTMLElement
@@ -155,41 +162,55 @@ describe('AddWikiModal', () => {
     await waitFor(() => expect(screen.queryByText('Add a wiki')).not.toBeInTheDocument())
   })
 
-  it('closes modal when Cancel is clicked', async () => {
-    await openModal()
-    await userEvent.click(screen.getByRole('button', { name: /^cancel$/i }))
-    expect(screen.queryByText('Add a wiki')).not.toBeInTheDocument()
+  it('opens existing folder modal from choice modal', async () => {
+    await openExistingFolderModal()
+    expect(screen.getByPlaceholderText('My Research')).toBeInTheDocument()
+    expect(screen.getByPlaceholderText('/Users/you/Documents')).toBeInTheDocument()
   })
 
-  it('switches to existing folder mode', async () => {
+  it('calls pickFolder when "Create with AI" is clicked', async () => {
     await openModal()
+    await userEvent.click(screen.getByText('Create with AI'))
+    expect(pickFolder).toHaveBeenCalled()
+  })
+
+  it('closes modal when Cancel is clicked in existing folder modal', async () => {
+    await openExistingFolderModal()
+    await userEvent.click(screen.getByRole('button', { name: /^cancel$/i }))
+    expect(screen.queryByPlaceholderText('My Research')).not.toBeInTheDocument()
+  })
+
+  it('switches between create and existing mode in existing folder modal', async () => {
+    await openExistingFolderModal()
+    // Default is create mode
+    expect(screen.getByText('Parent folder')).toBeInTheDocument()
     await userEvent.click(screen.getByText('Open existing folder'))
     expect(screen.getByText('Folder path')).toBeInTheDocument()
   })
 
   it('shows path hint when both name and path are filled (create mode)', async () => {
-    await openModal()
+    await openExistingFolderModal()
     await userEvent.type(screen.getByPlaceholderText('My Research'), 'My Docs')
     await userEvent.type(screen.getByPlaceholderText('/Users/you/Documents'), '/tmp/parent')
     await waitFor(() => expect(screen.getByText(/will create/i)).toBeInTheDocument())
   })
 
   it('submit button is disabled when fields are empty', async () => {
-    await openModal()
+    await openExistingFolderModal()
     const allBtns = screen.getAllByRole('button')
     const submitBtn = allBtns.find((b) => b.textContent?.includes('Create wiki') && !b.textContent?.includes('new'))
     expect(submitBtn).toBeDisabled()
   })
 
   it('browse button calls pickFolder and fills path', async () => {
-    await openModal()
+    await openExistingFolderModal()
     await userEvent.click(screen.getByRole('button', { name: /browse/i }))
     await waitFor(() => expect(screen.getByDisplayValue('/tmp/chosen')).toBeInTheDocument())
   })
 
   it('browse button is a no-op when pickFolder returns null (user cancelled)', async () => {
     vi.mocked(pickFolder).mockResolvedValue(null)
-    await openModal()
+    await openExistingFolderModal()
     await userEvent.click(screen.getByRole('button', { name: /browse/i }))
     // Path field should remain empty — no crash = null path handled correctly
     await waitFor(() => expect(screen.getByPlaceholderText('/Users/you/Documents')).toHaveValue(''))
@@ -197,7 +218,7 @@ describe('AddWikiModal', () => {
 
   it('shows error when pickFolder throws', async () => {
     vi.mocked(pickFolder).mockRejectedValue(new Error('Dialog cancelled'))
-    await openModal()
+    await openExistingFolderModal()
     await userEvent.click(screen.getByRole('button', { name: /browse/i }))
     await waitFor(() => expect(screen.getByText(/dialog cancelled/i)).toBeInTheDocument())
   })
@@ -206,7 +227,9 @@ describe('AddWikiModal', () => {
     const reload = vi.fn()
     vi.mocked(useWikis).mockReturnValue({ wikis: [], loading: false, reload })
     renderWithRouter(<VaultSelector />, { route: '/', path: '/' })
+    // Open choice modal → existing folder modal
     await userEvent.click(screen.getAllByText(/add.*wiki/i)[0])
+    await userEvent.click(screen.getByText('Add existing folder'))
     await userEvent.type(screen.getByPlaceholderText('My Research'), 'New Wiki')
     await userEvent.type(screen.getByPlaceholderText('/Users/you/Documents'), '/tmp')
     const allBtns = screen.getAllByRole('button')
@@ -218,7 +241,7 @@ describe('AddWikiModal', () => {
 
   it('shows error when addWiki throws', async () => {
     vi.mocked(addWiki).mockRejectedValue(new Error('Server error'))
-    await openModal()
+    await openExistingFolderModal()
     await userEvent.type(screen.getByPlaceholderText('My Research'), 'Test')
     await userEvent.type(screen.getByPlaceholderText('/Users/you/Documents'), '/tmp')
     const allBtns = screen.getAllByRole('button')
@@ -228,7 +251,7 @@ describe('AddWikiModal', () => {
   })
 
   it('allows selecting a different color', async () => {
-    await openModal()
+    await openExistingFolderModal()
     // React renders style as background-color (kebab), not backgroundColor
     const colorButtons = document.querySelectorAll('[style*="background-color"]')
     expect(colorButtons.length).toBeGreaterThan(1)
@@ -236,15 +259,21 @@ describe('AddWikiModal', () => {
     // Just ensures no crash
   })
 
-  it('empty-state Add your first wiki button opens the modal', async () => {
+  it('empty-state Add your first wiki button opens the choice modal', async () => {
     vi.mocked(useWikis).mockReturnValue({ wikis: [], loading: false, reload: vi.fn() })
     renderWithRouter(<VaultSelector />, { route: '/', path: '/' })
     await userEvent.click(screen.getByText('Add your first wiki'))
     await waitFor(() => expect(screen.getByText('Add a wiki')).toBeInTheDocument())
+    expect(screen.getByText('Create with AI')).toBeInTheDocument()
   })
 })
 
 describe('IDEPicker step in AddWikiModal', () => {
+  async function openExistingFolderModal() {
+    await userEvent.click(screen.getAllByText(/add.*wiki/i)[0])
+    await userEvent.click(screen.getByText('Add existing folder'))
+  }
+
   async function clickSubmit() {
     const allBtns = screen.getAllByRole('button')
     const submitBtn = allBtns.find((b) => b.textContent?.includes('Create wiki') && !b.textContent?.includes('new'))!
@@ -256,7 +285,7 @@ describe('IDEPicker step in AddWikiModal', () => {
     vi.mocked(detectIDEs).mockResolvedValue([{ id: 'cursor', name: 'Cursor' }])
     vi.mocked(addWiki).mockResolvedValue({ ...mockWiki, id: 'new-id' })
     renderWithRouter(<VaultSelector />, { route: '/', path: '/' })
-    await userEvent.click(screen.getAllByText(/add.*wiki/i)[0])
+    await openExistingFolderModal()
     await userEvent.type(screen.getByPlaceholderText('My Research'), 'Test')
     await userEvent.type(screen.getByPlaceholderText('/Users/you/Documents'), '/tmp')
     await clickSubmit()
@@ -271,7 +300,7 @@ describe('IDEPicker step in AddWikiModal', () => {
     vi.mocked(detectIDEs).mockResolvedValue([])
     vi.mocked(addWiki).mockResolvedValue({ ...mockWiki, id: 'new-id' })
     renderWithRouter(<VaultSelector />, { route: '/', path: '/' })
-    await userEvent.click(screen.getAllByText(/add.*wiki/i)[0])
+    await openExistingFolderModal()
     await userEvent.type(screen.getByPlaceholderText('My Research'), 'Test')
     await userEvent.type(screen.getByPlaceholderText('/Users/you/Documents'), '/tmp')
     await clickSubmit()
@@ -285,7 +314,7 @@ describe('IDEPicker step in AddWikiModal', () => {
     vi.mocked(openInIDE).mockRejectedValue(new Error('launch failed'))
     vi.mocked(addWiki).mockResolvedValue({ ...mockWiki, id: 'new-id' })
     renderWithRouter(<VaultSelector />, { route: '/', path: '/' })
-    await userEvent.click(screen.getAllByText(/add.*wiki/i)[0])
+    await openExistingFolderModal()
     await userEvent.type(screen.getByPlaceholderText('My Research'), 'Test')
     await userEvent.type(screen.getByPlaceholderText('/Users/you/Documents'), '/tmp')
     await clickSubmit()
@@ -301,7 +330,7 @@ describe('IDEPicker step in AddWikiModal', () => {
     vi.mocked(openInIDE).mockResolvedValue(undefined)
     vi.mocked(addWiki).mockResolvedValue({ ...mockWiki, id: 'new-id' })
     renderWithRouter(<VaultSelector />, { route: '/', path: '/' })
-    await userEvent.click(screen.getAllByText(/add.*wiki/i)[0])
+    await openExistingFolderModal()
     await userEvent.type(screen.getByPlaceholderText('My Research'), 'Test')
     await userEvent.type(screen.getByPlaceholderText('/Users/you/Documents'), '/tmp')
     await clickSubmit()
@@ -320,7 +349,7 @@ describe('IDEPicker step in AddWikiModal', () => {
     vi.mocked(detectIDEs).mockResolvedValue([{ id: 'cursor', name: 'Cursor' }])
     vi.mocked(addWiki).mockResolvedValue({ ...mockWiki, id: 'new-id' })
     renderWithRouter(<VaultSelector />, { route: '/', path: '/' })
-    await userEvent.click(screen.getAllByText(/add.*wiki/i)[0])
+    await openExistingFolderModal()
     await userEvent.type(screen.getByPlaceholderText('My Research'), 'Test')
     await userEvent.type(screen.getByPlaceholderText('/Users/you/Documents'), '/tmp')
     await clickSubmit()
@@ -338,7 +367,7 @@ describe('IDEPicker step in AddWikiModal', () => {
     vi.mocked(openInIDE).mockResolvedValue(undefined)
     vi.mocked(addWiki).mockResolvedValue({ ...mockWiki, id: 'new-id' })
     renderWithRouter(<VaultSelector />, { route: '/', path: '/' })
-    await userEvent.click(screen.getAllByText(/add.*wiki/i)[0])
+    await openExistingFolderModal()
     await userEvent.type(screen.getByPlaceholderText('My Research'), 'Test')
     await userEvent.type(screen.getByPlaceholderText('/Users/you/Documents'), '/tmp')
     await clickSubmit()

@@ -5,6 +5,7 @@ import LogView from './LogView'
 
 vi.mock('../hooks/useWiki', () => ({
   useLog: vi.fn(),
+  useWikiSocket: vi.fn(),
 }))
 import { useLog } from '../hooks/useWiki'
 

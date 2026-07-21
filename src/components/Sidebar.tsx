@@ -15,13 +15,11 @@ import {
   ClipboardPaste,
   Send,
   FileText,
-  ClipboardCopy,
   Sparkles,
 } from 'lucide-react'
 import { useSearch, useRawFiles, useWikis } from '../hooks/useWiki'
 import type { WikiPageMeta, SearchResult, PageType, RawFile } from '../types'
 import { PAGE_TYPE_COLORS } from '../types'
-import IDELaunchModal from './IDELaunchModal'
 import IngestStatus from './IngestStatus'
 
 interface SidebarProps {
@@ -212,6 +210,21 @@ function IngestSection({ wikiId, inboxExists, onUploaded }: { wikiId: string; in
   const [pasteFilename, setPasteFilename] = useState('')
   const [pasteContent, setPasteContent] = useState('')
 
+  // Debug: Log ALL drag events on document to detect Outlook drops
+  useEffect(() => {
+    const logDrag = (e: DragEvent) => {
+      console.log(`[Document ${e.type}] types:`, e.dataTransfer?.types, 'files:', e.dataTransfer?.files?.length)
+    }
+    document.addEventListener('dragenter', logDrag)
+    document.addEventListener('dragover', logDrag)
+    document.addEventListener('drop', logDrag)
+    return () => {
+      document.removeEventListener('dragenter', logDrag)
+      document.removeEventListener('dragover', logDrag)
+      document.removeEventListener('drop', logDrag)
+    }
+  }, [])
+
   const showSuccess = (msg: string) => {
     setError(null)
     setSuccess(msg)
@@ -282,8 +295,19 @@ function IngestSection({ wikiId, inboxExists, onUploaded }: { wikiId: string; in
       // Snapshot synchronously (DataTransfer clears after handler returns),
       // then resolve asynchronously and upload.
       const snap = snapshotDrop(e.dataTransfer)
+      // Debug logging for drag/drop troubleshooting
+      console.log('[Drop] Available types:', snap.availableTypes)
+      console.log('[Drop] stdFiles:', snap.stdFiles.length, snap.stdFiles.map(f => f.name))
+      console.log('[Drop] itemFiles:', snap.itemFiles.length, snap.itemFiles.map(f => f.name))
+      console.log('[Drop] entries:', snap.entries.length, snap.entries.map(e => e.name))
+      console.log('[Drop] plainText length:', snap.plainText.length)
+      console.log('[Drop] htmlText length:', snap.htmlText.length)
+      console.log('[Drop] emailData length:', snap.emailData.length)
       /* v8 ignore next */
-      resolveDropSnapshot(snap).then((files) => { if (files.length) handleFilesRef.current(files) })
+      resolveDropSnapshot(snap).then((files) => {
+        console.log('[Drop] Resolved files:', files.length, files.map(f => `${f.name} (${f.type})`))
+        if (files.length) handleFilesRef.current(files)
+      })
     }
 
     el.addEventListener('dragover', onDragOver)
@@ -424,41 +448,60 @@ function IngestSection({ wikiId, inboxExists, onUploaded }: { wikiId: string; in
   )
 }
 
-function InboxSection({ wikiId: _wikiId, wikiPath, files, loading, reload }: { wikiId: string; wikiPath: string; files: RawFile[]; loading: boolean; reload: () => void }) {
-  const [ingestTarget, setIngestTarget] = useState<RawFile | null>(null)
+function InboxSection({ wikiId, wikiPath, files, loading, reload }: { wikiId: string; wikiPath: string; files: RawFile[]; loading: boolean; reload: () => void }) {
+  const [ingesting, setIngesting] = useState<string | null>(null) // filename being ingested
+  const [ingestStatus, setIngestStatus] = useState<{ file: string; type: 'success' | 'error'; msg: string } | null>(null)
 
   const inboxFiles: RawFile[] = files.filter((f) => f.path.startsWith('inbox/'))
+
+  const handleIngest = async (file: RawFile) => {
+    setIngesting(file.name)
+    setIngestStatus(null)
+    try {
+      // Call the AI agent's ingest endpoint
+      const res = await fetch('http://localhost:8000/ingest', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          wiki_id: wikiId,
+          file_path: `${wikiPath}/raw/inbox/${file.name}`,
+        }),
+      })
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        throw new Error(data.detail || `Server error: ${res.status}`)
+      }
+      setIngestStatus({ file: file.name, type: 'success', msg: 'Queued for processing' })
+      setTimeout(() => setIngestStatus(null), 3000)
+    } catch (e) {
+      setIngestStatus({ file: file.name, type: 'error', msg: String(e) })
+      setTimeout(() => setIngestStatus(null), 5000)
+    } finally {
+      setIngesting(null)
+    }
+  }
 
   if (loading || inboxFiles.length === 0) return null
 
   return (
-    <>
-      {/* IDE launch modal — rendered at root level so it overlays the sidebar */}
-      {ingestTarget && (
-        <IDELaunchModal
-          key={ingestTarget.name}
-          title={`Ingest ${ingestTarget.name}`}
-          wikiPath={wikiPath}
-          fixedCommand={`ADD raw/inbox/${ingestTarget.name}`}
-          onClose={() => setIngestTarget(null)}
-        />
-      )}
-
-      <div className="border-t border-[var(--border)] py-2">
-        <div className="flex items-center justify-between px-4 pb-1.5">
-          <p className="text-xs font-semibold text-[var(--text-muted)] uppercase tracking-wider">
-            Inbox ({inboxFiles.length})
-          </p>
-          <button
-            onClick={reload}
-            className="text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
-            title="Refresh inbox"
-          >
-            <ScrollText size={11} />
-          </button>
-        </div>
-        <div className="px-2 space-y-0.5">
-          {inboxFiles.map((file) => (
+    <div className="border-t border-[var(--border)] py-2">
+      <div className="flex items-center justify-between px-4 pb-1.5">
+        <p className="text-xs font-semibold text-[var(--text-muted)] uppercase tracking-wider">
+          Inbox ({inboxFiles.length})
+        </p>
+        <button
+          onClick={reload}
+          className="text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
+          title="Refresh inbox"
+        >
+          <ScrollText size={11} />
+        </button>
+      </div>
+      <div className="px-2 space-y-0.5">
+        {inboxFiles.map((file) => {
+          const isIngesting = ingesting === file.name
+          const status = ingestStatus?.file === file.name ? ingestStatus : null
+          return (
             <div
               key={file.name}
               className="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-[var(--bg-elevated)]/30 group"
@@ -467,19 +510,34 @@ function InboxSection({ wikiId: _wikiId, wikiPath, files, loading, reload }: { w
               <span className="text-xs text-[var(--text-secondary)] truncate flex-1" title={file.name}>
                 {file.name}
               </span>
-              <button
-                onClick={() => setIngestTarget(file)}
-                title="Open in editor and copy ingest command"
-                className="flex items-center gap-1 px-1.5 py-0.5 rounded text-xs transition-colors flex-shrink-0 text-[var(--text-muted)] hover:text-[var(--accent)] hover:bg-[var(--accent-faint)] opacity-0 group-hover:opacity-100"
-              >
-                <ClipboardCopy size={11} />
-                <span>Ingest</span>
-              </button>
+              {status ? (
+                <span className={`text-xs px-1.5 py-0.5 rounded ${
+                  status.type === 'success' 
+                    ? 'text-[var(--success)] bg-[var(--success-faint)]' 
+                    : 'text-[var(--error)] bg-[var(--error-faint)]'
+                }`}>
+                  {status.msg}
+                </span>
+              ) : (
+                <button
+                  onClick={() => handleIngest(file)}
+                  disabled={isIngesting}
+                  title="Process with AI agent"
+                  className="flex items-center gap-1 px-1.5 py-0.5 rounded text-xs transition-colors flex-shrink-0 text-[var(--text-muted)] hover:text-[var(--accent)] hover:bg-[var(--accent-faint)] opacity-0 group-hover:opacity-100 disabled:opacity-50"
+                >
+                  {isIngesting ? (
+                    <Loader2 size={11} className="animate-spin" />
+                  ) : (
+                    <Sparkles size={11} />
+                  )}
+                  <span>{isIngesting ? 'Processing...' : 'Ingest'}</span>
+                </button>
+              )}
             </div>
-          ))}
-        </div>
+          )
+        })}
       </div>
-    </>
+    </div>
   )
 }
 
@@ -555,24 +613,24 @@ export default function Sidebar({ wikiId, pages, mode = 'wiki' }: SidebarProps) 
         </div>
       </div>
 
-      {/* Nav — wiki-only views */}
-      {!isFolder && (
-        <div className="px-2 py-2 border-b border-[var(--border)] space-y-0.5">
-          <NavItem
-            label="Graph view"
-            to={`/wiki/${wikiId}/graph`}
-            icon={<GitGraph size={14} />}
-          />
-          <NavItem
-            label="Activity log"
-            to={`/wiki/${wikiId}/log`}
-            icon={<ScrollText size={14} />}
-          />
-          {!isFolder && (
-            <NavItem label="AI Search" to={`/wiki/${wikiId}/search`} icon={<Sparkles size={15} />} />
-          )}
-        </div>
-      )}
+      {/* Nav */}
+      <div className="px-2 py-2 border-b border-[var(--border)] space-y-0.5">
+        <NavItem label="AI Search" to={`/wiki/${wikiId}/search`} icon={<Sparkles size={15} />} />
+        {!isFolder && (
+          <>
+            <NavItem
+              label="Graph view"
+              to={`/wiki/${wikiId}/graph`}
+              icon={<GitGraph size={14} />}
+            />
+            <NavItem
+              label="Activity log"
+              to={`/wiki/${wikiId}/log`}
+              icon={<ScrollText size={14} />}
+            />
+          </>
+        )}
+      </div>
 
       {/* Page / file tree */}
       <div className="flex-1 overflow-y-auto px-2 py-2">

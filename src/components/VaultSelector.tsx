@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   BookOpen,
@@ -17,14 +17,18 @@ import {
   MonitorPlay,
   Moon,
   Check,
+  Upload,
+  Sparkles,
 } from 'lucide-react'
 import SirenIcon from './SirenIcon'
 import { useWikis, addWiki, removeWiki, pickFolder, detectIDEs, openInIDE } from '../hooks/useWiki'
 import type { IDEInfo } from '../hooks/useWiki'
 import { WIKI_DEFAULT_COLORS } from '../types'
 import type { WikiConfig } from '../types'
+import { snapshotDrop, resolveDropSnapshot } from '../utils/dragDrop'
 import { useTheme } from '../ThemeContext'
 import { IDE_CREATE_COMMANDS, writeToClipboard } from './IDELaunchModal'
+import CreateWikiWizard from './CreateWikiWizard'
 
 // ─── IDE Picker (shown after wiki creation) ───────────────────────────────────
 
@@ -330,13 +334,104 @@ function AddWikiModal({ onClose, onAdded }: { onClose: () => void; onAdded: () =
 
 function WikiCard({ vault, onOpen, onRemove }: { vault: WikiConfig; onOpen: () => void; onRemove: () => void }) {
   const [confirmRemove, setConfirmRemove] = useState(false)
+  const [dragOver, setDragOver] = useState(false)
+  const [uploading, setUploading] = useState(false)
+  const [uploadMsg, setUploadMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
+  const cardRef = useRef<HTMLDivElement>(null)
+
+  // Upload files to this wiki
+  const handleFiles = useCallback(async (files: File[]) => {
+    if (!files.length) return
+    setUploading(true)
+    setUploadMsg(null)
+    try {
+      const form = new FormData()
+      for (const f of files) form.append('files', f)
+      const res = await fetch(`/api/wikis/${vault.id}/raw/upload`, { method: 'POST', body: form })
+      if (!res.ok) throw new Error(`Server error: ${res.status}`)
+      const data = (await res.json()) as { uploaded: Array<{ name: string }> }
+      setUploadMsg({ type: 'success', text: `Added ${data.uploaded.length} file${data.uploaded.length > 1 ? 's' : ''}` })
+      setTimeout(() => setUploadMsg(null), 3000)
+    } catch (e) {
+      setUploadMsg({ type: 'error', text: String(e) })
+      setTimeout(() => setUploadMsg(null), 5000)
+    } finally {
+      setUploading(false)
+    }
+  }, [vault.id])
+
+  // Native drag-drop handlers
+  useEffect(() => {
+    const el = cardRef.current
+    if (!el) return
+
+    const onDragOver = (e: DragEvent) => { e.preventDefault(); e.stopPropagation(); setDragOver(true) }
+    const onDragEnter = (e: DragEvent) => { e.preventDefault(); e.stopPropagation(); setDragOver(true) }
+    const onDragLeave = (e: DragEvent) => {
+      e.preventDefault()
+      if (!el.contains(e.relatedTarget as Node | null)) setDragOver(false)
+    }
+    const onDrop = (e: DragEvent) => {
+      e.preventDefault()
+      e.stopPropagation()
+      setDragOver(false)
+      if (!e.dataTransfer) return
+      const snap = snapshotDrop(e.dataTransfer)
+      resolveDropSnapshot(snap).then((files) => {
+        if (files.length) handleFiles(files)
+      })
+    }
+
+    el.addEventListener('dragover', onDragOver)
+    el.addEventListener('dragenter', onDragEnter)
+    el.addEventListener('dragleave', onDragLeave)
+    el.addEventListener('drop', onDrop)
+    return () => {
+      el.removeEventListener('dragover', onDragOver)
+      el.removeEventListener('dragenter', onDragEnter)
+      el.removeEventListener('dragleave', onDragLeave)
+      el.removeEventListener('drop', onDrop)
+    }
+  }, [handleFiles])
 
   return (
     <div
-      className="group relative bg-[var(--bg-surface)] border border-[var(--border)] rounded-xl p-5 hover:border-[var(--border-strong)] transition-all cursor-pointer flex flex-col gap-4"
+      ref={cardRef}
+      className={`group relative bg-[var(--bg-surface)] border rounded-xl p-5 transition-all cursor-pointer flex flex-col gap-4
+        ${dragOver ? 'border-[var(--accent)] ring-2 ring-[var(--accent)]/30 scale-[1.02]' : 'border-[var(--border)] hover:border-[var(--border-strong)]'}`}
       onClick={onOpen}
-      style={{ borderTopColor: vault.color, borderTopWidth: '3px' }}
+      style={{ borderTopColor: dragOver ? 'var(--accent)' : vault.color, borderTopWidth: '3px' }}
     >
+      {/* Drag overlay */}
+      {dragOver && (
+        <div className="absolute inset-0 bg-[var(--accent)]/10 rounded-xl flex flex-col items-center justify-center gap-2 z-10 pointer-events-none">
+          <Upload size={28} className="text-[var(--accent)]" />
+          <span className="text-sm font-medium text-[var(--accent)]">Drop files to add to {vault.name}</span>
+        </div>
+      )}
+
+      {/* Uploading indicator */}
+      {uploading && (
+        <div className="absolute inset-0 bg-[var(--bg-base)]/80 rounded-xl flex flex-col items-center justify-center gap-2 z-10">
+          <Loader2 size={24} className="animate-spin text-[var(--accent)]" />
+          <span className="text-sm text-[var(--text-muted)]">Uploading...</span>
+        </div>
+      )}
+
+      {/* Upload message toast */}
+      {uploadMsg && (
+        <div
+          className={`absolute top-2 left-2 right-2 px-3 py-2 rounded-lg text-xs font-medium z-20 ${
+            uploadMsg.type === 'success'
+              ? 'bg-[var(--success-faint)] text-[var(--success)] border border-[var(--success-border)]'
+              : 'bg-[var(--error-faint)] text-[var(--error)] border border-[var(--error-border)]'
+          }`}
+          onClick={(e) => e.stopPropagation()}
+        >
+          {uploadMsg.text}
+        </div>
+      )}
+
       {/* Remove button */}
       <button
         onClick={(e) => { e.stopPropagation(); setConfirmRemove(true) }}
@@ -420,7 +515,8 @@ function WikiCard({ vault, onOpen, onRemove }: { vault: WikiConfig; onOpen: () =
 export default function WikiSelector() {
   const navigate = useNavigate()
   const { wikis, loading, reload } = useWikis()
-  const [showModal, setShowModal] = useState(false)
+  const [modalType, setModalType] = useState<'choice' | 'create' | 'existing' | null>(null)
+  const [parentPath, setParentPath] = useState('/Users') // For CreateWikiWizard
   const { theme, toggleTheme } = useTheme()
   const handleRemove = async (id: string) => {
     await removeWiki(id)
@@ -459,7 +555,7 @@ export default function WikiSelector() {
             </p>
           </div>
           <button
-            onClick={() => setShowModal(true)}
+            onClick={() => setModalType('choice')}
             className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[var(--accent-faint)] text-[var(--accent)] border border-[var(--accent-border)] hover:bg-[var(--accent-moderate)] text-sm font-medium transition-colors"
           >
             <Plus size={15} />
@@ -481,7 +577,7 @@ export default function WikiSelector() {
               Create a new wiki or connect an existing folder to get started.
             </p>
             <button
-              onClick={() => setShowModal(true)}
+              onClick={() => setModalType('choice')}
               className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg bg-[var(--accent-faint)] text-[var(--accent)] border border-[var(--accent-border)] hover:bg-[var(--accent-moderate)] text-sm font-medium transition-colors"
             >
               <Plus size={15} />
@@ -500,7 +596,7 @@ export default function WikiSelector() {
             ))}
             {/* Add wiki card */}
             <button
-              onClick={() => setShowModal(true)}
+              onClick={() => setModalType('choice')}
               className="bg-[var(--surface-half)] border-2 border-dashed border-[var(--border)] rounded-xl p-5 hover:border-[var(--border-strong)] hover:bg-[var(--bg-surface)] transition-all flex flex-col items-center justify-center gap-3 min-h-48 text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
             >
               <FolderPlus size={24} />
@@ -510,8 +606,75 @@ export default function WikiSelector() {
         )}
       </main>
 
-      {showModal && (
-        <AddWikiModal onClose={() => setShowModal(false)} onAdded={reload} />
+      {/* Choice modal - pick between AI wizard or existing folder */}
+      {modalType === 'choice' && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+          <div className="bg-[var(--bg-surface)] border border-[var(--border)] rounded-xl shadow-2xl w-full max-w-md mx-4">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-[var(--border)]">
+              <h2 className="text-base font-semibold text-[var(--text-primary)]">Add a wiki</h2>
+              <button onClick={() => setModalType(null)} className="text-[var(--text-muted)] hover:text-[var(--text-primary)]">
+                <X size={18} />
+              </button>
+            </div>
+            <div className="px-6 py-5 space-y-3">
+              <button
+                onClick={async () => {
+                  const folder = await pickFolder()
+                  if (folder) {
+                    setParentPath(folder)
+                    setModalType('create')
+                  }
+                }}
+                className="w-full flex items-start gap-4 p-4 rounded-lg border border-[var(--border)] hover:border-[var(--accent-border)] hover:bg-[var(--accent-faint)] transition-all text-left group"
+              >
+                <div className="w-10 h-10 rounded-lg bg-[var(--accent-faint)] flex items-center justify-center flex-shrink-0 group-hover:bg-[var(--accent-moderate)]">
+                  <Sparkles size={18} className="text-[var(--accent)]" />
+                </div>
+                <div>
+                  <h3 className="font-medium text-[var(--text-primary)]">Create with AI</h3>
+                  <p className="text-xs text-[var(--text-muted)] mt-0.5">
+                    AI proposes a folder structure based on your topics. Recommended for new wikis.
+                  </p>
+                </div>
+                <ChevronRight size={16} className="text-[var(--text-muted)] mt-2.5 ml-auto flex-shrink-0" />
+              </button>
+
+              <button
+                onClick={() => setModalType('existing')}
+                className="w-full flex items-start gap-4 p-4 rounded-lg border border-[var(--border)] hover:border-[var(--border-strong)] hover:bg-[var(--bg-elevated)] transition-all text-left group"
+              >
+                <div className="w-10 h-10 rounded-lg bg-[var(--bg-elevated)] flex items-center justify-center flex-shrink-0">
+                  <FolderOpen size={18} className="text-[var(--text-muted)]" />
+                </div>
+                <div>
+                  <h3 className="font-medium text-[var(--text-primary)]">Add existing folder</h3>
+                  <p className="text-xs text-[var(--text-muted)] mt-0.5">
+                    Connect an existing wiki folder that already has a structure.
+                  </p>
+                </div>
+                <ChevronRight size={16} className="text-[var(--text-muted)] mt-2.5 ml-auto flex-shrink-0" />
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* AI wizard modal */}
+      {modalType === 'create' && (
+        <CreateWikiWizard
+          parentPath={parentPath}
+          onClose={() => setModalType(null)}
+          onCreated={(wikiId) => {
+            reload()
+            setModalType(null)
+            navigate(`/wiki/${wikiId}`)
+          }}
+        />
+      )}
+
+      {/* Existing folder modal */}
+      {modalType === 'existing' && (
+        <AddWikiModal onClose={() => setModalType(null)} onAdded={reload} />
       )}
     </div>
   )

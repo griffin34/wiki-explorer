@@ -5,6 +5,7 @@ import WikiPage from './components/WikiPage'
 import GraphView from './components/GraphView'
 import LogView from './components/LogView'
 import AISearch from './components/AISearch'
+import AIToast from './components/AIToast'
 
 function WikiIndexRedirect() {
   const { wikiId } = useParams<{ wikiId: string }>()
@@ -14,6 +15,7 @@ function WikiIndexRedirect() {
 export default function App() {
   return (
     <BrowserRouter>
+      <AIToast />
       <Routes>
         {/* Front page — wiki selector */}
         <Route path="/" element={<WikiSelector />} />

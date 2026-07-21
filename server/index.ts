@@ -37,7 +37,9 @@ function sanitizePageId(pageId: string): string {
 const ALLOWED_UPLOAD_EXTENSIONS = new Set([
   '.md', '.txt', '.pdf', '.doc', '.docx', '.ppt', '.pptx',
   '.xls', '.xlsx', '.csv', '.json', '.html', '.htm', '.xml',
-  '.rst', '.rtf', '.odt', '.epub', '.png', '.jpg', '.jpeg', '.gif', '.webp'
+  '.rst', '.rtf', '.odt', '.epub', '.png', '.jpg', '.jpeg', '.gif', '.webp',
+  // Email formats
+  '.eml', '.msg', '.mht', '.mhtml'
 ])
 
 /** Max file size: 50MB */
