@@ -44,8 +44,11 @@ def find_content_root(wiki_path: Path) -> Path | None:
     return None
 
 
-def chunk_text(text: str, chunk_size: int = 512, overlap: int = 64) -> list[str]:
-    """Paragraph-aware text chunker using word count as proxy for tokens."""
+def chunk_text(text: str, chunk_size: int = 512, overlap: int = 64, max_chunk_chars: int = 2500) -> list[str]:
+    """Paragraph-aware text chunker using word count as proxy for tokens.
+    
+    Also enforces a character limit to handle content with long "words" (like email addresses).
+    """
     paragraphs = [p.strip() for p in text.split("\n\n") if p.strip()]
     chunks: list[str] = []
     current_words: list[str] = []
@@ -66,7 +69,21 @@ def chunk_text(text: str, chunk_size: int = 512, overlap: int = 64) -> list[str]
     if current_words:
         chunks.append(" ".join(current_words))
 
-    return [c for c in chunks if c.strip()]
+    # Secondary pass: split any chunks that exceed max_chunk_chars
+    final_chunks: list[str] = []
+    for chunk in chunks:
+        if len(chunk) <= max_chunk_chars:
+            final_chunks.append(chunk)
+        else:
+            # Split by character count with overlap
+            start = 0
+            char_overlap = 200
+            while start < len(chunk):
+                end = min(start + max_chunk_chars, len(chunk))
+                final_chunks.append(chunk[start:end])
+                start = end - char_overlap if end < len(chunk) else end
+
+    return [c for c in final_chunks if c.strip()]
 
 
 # ---------------------------------------------------------------------------
@@ -427,8 +444,8 @@ class IngestionAgent:
                 },
             )
 
-            # 8. Auto-generate wiki page
-            if settings.wiki_auto_generate and self.wiki_agent and wiki_config:
+            # 8. Auto-generate wiki page (skip during reindex - pages already exist)
+            if settings.wiki_auto_generate and self.wiki_agent and wiki_config and not is_reindex:
                 await self.wiki_agent.enqueue(wiki_id, source_file_rel, wiki_config)
 
             # Record in history

@@ -102,7 +102,13 @@ export default function WikiPage() {
   const fm = page.frontmatter
   const title = (fm.title as string) || pageId
   const type = (fm.type as string) || 'page'
-  const tags = (fm.tags as string[]) || []
+  // Handle tags as array or comma-separated string
+  const rawTags = fm.tags
+  const tags: string[] = Array.isArray(rawTags)
+    ? rawTags
+    : typeof rawTags === 'string'
+    ? rawTags.split(',').map((t) => t.trim()).filter(Boolean)
+    : []
   const updated = fm.updated as string
   const sources = fm.sources as number
 

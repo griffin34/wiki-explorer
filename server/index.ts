@@ -536,13 +536,20 @@ app.get('/api/wikis/:id/wiki', (_req, res) => {
     const { data, content } = matter(raw)
     const id = pageIdFromPath(f, v)
     const links = extractLinks(content)
+    // Normalize tags: handle both array and comma-separated string
+    const rawTags = data.tags
+    const tags = Array.isArray(rawTags)
+      ? rawTags
+      : typeof rawTags === 'string'
+      ? rawTags.split(',').map((t: string) => t.trim()).filter(Boolean)
+      : []
     return {
       id,
       /* v8 ignore next */
       title: (data.title as string) || id.split('/').pop() || id,
       /* v8 ignore next */
       type: (data.type as string) || 'page',
-      tags: (data.tags as string[]) || [],
+      tags,
       sources: (data.sources as number) || 0,
       created: (data.created as string) || '',
       updated: (data.updated as string) || '',
@@ -604,13 +611,20 @@ app.get('/api/wikis/:id/graph', (_req, res) => {
     const { data, content } = matter(safeRead(f) ?? '')
     const id = pageIdFromPath(f, v)
     const links = extractLinks(content)
+    // Normalize tags: handle both array and comma-separated string
+    const rawTags = data.tags
+    const tags = Array.isArray(rawTags)
+      ? rawTags
+      : typeof rawTags === 'string'
+      ? rawTags.split(',').map((t: string) => t.trim()).filter(Boolean)
+      : []
     nodeMap.set(id, {
       id,
       /* v8 ignore next */
       title: (data.title as string) || id.split('/').pop() || id,
       /* v8 ignore next */
       type: (data.type as string) || 'page',
-      tags: (data.tags as string[]) || [],
+      tags,
       linkCount: links.length,
       wordCount: content.split(/\s+/).filter(Boolean).length,
     })
