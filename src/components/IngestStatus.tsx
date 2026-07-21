@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Loader2, CheckCircle2, XCircle, FileText, Brain, Wifi, WifiOff } from 'lucide-react'
+import { Loader2, CheckCircle2, XCircle, FileText, Brain, Zap, ZapOff } from 'lucide-react'
 import { useWikiSocket } from '../hooks/useWiki'
 import type { WsEvent } from '../types'
 
@@ -122,12 +122,12 @@ export default function IngestStatus({ wikiId }: Props) {
             {recentCount > 0 && (
               <span className="text-[10px] text-[var(--success,#a6e3a1)]">{recentCount} processed</span>
             )}
-            <Wifi size={12} className="text-[var(--success,#a6e3a1)]" />
+            <Zap size={12} className="text-[var(--success,#a6e3a1)]" />
           </div>
         ) : (
           <div className="flex items-center gap-1" title="AI service offline - run ./start-ai.sh">
             <span className="text-[10px] text-[var(--text-muted)]">offline</span>
-            <WifiOff size={12} className="text-[var(--text-muted)]" />
+            <ZapOff size={12} className="text-[var(--text-muted)]" />
           </div>
         )}
       </div>
