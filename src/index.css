@@ -20,6 +20,20 @@ body {
   font-family: 'Inter', system-ui, sans-serif;
 }
 
+/* Electron window dragging */
+.wiki-topbar,
+.wiki-header {
+  -webkit-app-region: drag;
+}
+.wiki-topbar button,
+.wiki-topbar a,
+.wiki-topbar input,
+.wiki-header button,
+.wiki-header a,
+.wiki-header input {
+  -webkit-app-region: no-drag;
+}
+
 /* Scrollbars */
 ::-webkit-scrollbar {
   width: 6px;

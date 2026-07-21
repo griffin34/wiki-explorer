@@ -43,7 +43,7 @@ export default function CreateWikiWizard({ parentPath, onClose, onCreated }: Cre
 
   // Step 3-4: Creating/Complete
   const [creating, setCreating] = useState(false)
-  const [createdWikiId, setCreatedWikiId] = useState<string | null>(null)
+  const [, setCreatedWikiId] = useState<string | null>(null)
   const [createdPath, setCreatedPath] = useState<string | null>(null)
   const [filesCreated, setFilesCreated] = useState<string[]>([])
 

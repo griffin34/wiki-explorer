@@ -27,7 +27,7 @@ mac:
       arch: [universal]
     - target: zip
       arch: [universal]
-  icon: build/icon.icns
+  icon: build/icon.png
   darkModeSupport: true
   hardenedRuntime: true
   gatekeeperAssess: false
@@ -48,7 +48,7 @@ win:
   target:
     - target: nsis
       arch: [x64]
-  icon: build/icon.ico
+  icon: build/icon.png
 
 nsis:
   oneClick: false
@@ -62,7 +62,7 @@ linux:
     - target: deb
       arch: [x64]
   category: Office
-  icon: build/icons
+  icon: build/icon.png
 
 # Don't publish to any update server by default
 publish: null
