@@ -1,6 +1,6 @@
 appId: com.wiki-explorer.app
 productName: Wiki Explorer
-copyright: Copyright © 2024
+copyright: Copyright © 2026
 
 directories:
   output: app
@@ -36,6 +36,7 @@ mac:
 
 dmg:
   artifactName: "${productName}-${version}-${arch}.${ext}"
+  icon: build/icon.png
   contents:
     - x: 130
       y: 220
