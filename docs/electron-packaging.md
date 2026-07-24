@@ -351,3 +351,98 @@ function getDataDir(): string {
 - [ ] Update README with Electron usage
 - [ ] Document build requirements
 - [ ] Add release workflow instructions
+
+---
+
+## Self-Contained App Architecture (Implemented)
+
+The app has been updated to support a fully self-contained experience where the DMG installs all dependencies and the app starts cleanly without requiring external service setup.
+
+### Architecture Changes
+
+#### 1. AI Service Status Tracking
+The Electron main process now tracks the status of all AI services:
+- `ollama`: starting | ready | unavailable
+- `chroma`: starting | ready | unavailable
+- `agent`: starting | ready | unavailable
+- `overall`: starting | ready | degraded | unavailable
+
+The frontend can query this via `window.electronAPI.getAIStatus()`.
+
+#### 2. Graceful Degradation
+If AI services fail to start, the app still loads and functions for browsing wikis:
+- No blocking dialogs during startup
+- UI can display AI status and guide users to install missing components
+- Core wiki browsing works without AI features
+
+#### 3. Inbox Catch-up on Startup
+When the app launches, the ingestion agent now scans all wiki inboxes for files that were dropped while the app was offline. Files are processed in order, ensuring no documents are missed.
+
+#### 4. Bundled Python Agent
+The Python agent service is bundled using PyInstaller:
+
+```bash
+# Build the agent executable
+npm run build:agent
+
+# Full build including agent
+npm run electron:build:full
+```
+
+This creates `dist-agent/wiki-agent/wiki-agent` which is included in the app bundle via `extraResources` in electron-builder.yml.
+
+#### 5. Embedded ChromaDB
+In production mode, ChromaDB runs embedded inside the agent process (using `PersistentClient`) instead of as a separate server. This eliminates the need for a standalone ChromaDB server:
+
+- Development: Uses HTTP mode (separate ChromaDB server)
+- Production: Uses embedded mode (data stored in user data directory)
+
+Environment variables for production:
+- `CHROMA_EMBEDDED=true`
+- `CHROMA_PATH=/path/to/userData/chroma`
+- `VAULTS_FILE=/path/to/userData/vaults.json`
+
+### Build Commands
+
+| Command | Description |
+|---------|-------------|
+| `npm run build:agent` | Build Python agent with PyInstaller |
+| `npm run electron:build:full` | Full build (agent + app) |
+| `npm run electron:build:mac` | macOS DMG with bundled agent |
+
+### Remaining Dependencies
+
+**Ollama** is auto-installed on first launch if not found:
+- macOS: Uses Homebrew if available, otherwise downloads official installer
+- Linux: Uses official install script (`curl -fsSL https://ollama.com/install.sh | sh`)
+
+The installation happens automatically during startup with progress shown in the splash screen. If installation fails, the app still launches but with AI features disabled.
+
+### File Structure After Build
+
+```
+Wiki Explorer.app/
+├── Contents/
+│   ├── MacOS/
+│   │   └── Wiki Explorer
+│   └── Resources/
+│       ├── app.asar
+│       ├── app.asar.unpacked/
+│       │   ├── dist/          # React frontend
+│       │   └── dist-server/   # Express server
+│       ├── agent/             # Bundled Python agent
+│       │   └── wiki-agent/
+│       │       └── wiki-agent (executable)
+│       └── wiki-template/     # Wiki scaffolding
+```
+
+### User Data Location
+
+All user data is stored in the system-appropriate location:
+- macOS: `~/Library/Application Support/Wiki Explorer/`
+- Windows: `%APPDATA%/Wiki Explorer/`
+- Linux: `~/.config/Wiki Explorer/`
+
+Contents:
+- `data/vaults.json` - Wiki registry
+- `chroma/` - Embedded ChromaDB data

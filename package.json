@@ -13,10 +13,15 @@
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "electron:dev": "concurrently -n server,ui,electron -c cyan,magenta,yellow \"npm run dev:server\" \"npm run dev:ui\" \"npm run electron:start\"",
-    "electron:start": "tsc -p tsconfig.electron.json && electron .",
-    "electron:build": "npm run build && tsc -p tsconfig.electron.json && electron-builder",
-    "electron:build:mac": "npm run electron:build -- --mac",
-    "electron:build:win": "npm run electron:build -- --win"
+    "electron:start": "tsc -p tsconfig.electron.json && npm run build:preload && electron .",
+    "electron:build": "npm run build && tsc -p tsconfig.electron.json && npm run build:server && npm run build:preload && electron-builder",
+    "electron:build:full": "npm run build:agent && npm run electron:build",
+    "electron:build:mac": "npm run electron:build:full -- --mac",
+    "electron:build:win": "npm run build:agent:win && npm run electron:build -- --win",
+    "build:agent": "bash scripts/build-agent.sh",
+    "build:agent:win": "powershell -ExecutionPolicy Bypass -File scripts/build-agent.ps1",
+    "build:server": "esbuild server/index.ts --bundle --platform=node --format=cjs --outfile=dist-server/index.cjs --external:fsevents",
+    "build:preload": "esbuild electron/preload.ts --bundle --platform=node --format=cjs --outfile=electron/preload.cjs --external:electron"
   },
   "dependencies": {
     "chokidar": "^3.5.3",

@@ -3,6 +3,8 @@ node_modules/
 
 # Build output
 dist/
+dist-agent/
+dist-server/
 coverage/
 app/
 *.tsbuildinfo
@@ -10,6 +12,7 @@ app/
 # Electron compiled output (keep source .ts files)
 electron/*.js
 electron/*.js.map
+electron/*.cjs
 
 # Wiki data (local registry — paths are machine-specific)
 data/

@@ -22,6 +22,7 @@ import {
 } from 'lucide-react'
 import SirenIcon from './SirenIcon'
 import { useWikis, addWiki, removeWiki, pickFolder, detectIDEs, openInIDE } from '../hooks/useWiki'
+import { api } from '../utils/api'
 import type { IDEInfo } from '../hooks/useWiki'
 import { WIKI_DEFAULT_COLORS } from '../types'
 import type { WikiConfig } from '../types'
@@ -347,7 +348,7 @@ function WikiCard({ vault, onOpen, onRemove }: { vault: WikiConfig; onOpen: () =
     try {
       const form = new FormData()
       for (const f of files) form.append('files', f)
-      const res = await fetch(`/api/wikis/${vault.id}/raw/upload`, { method: 'POST', body: form })
+      const res = await fetch(api(`/api/wikis/${vault.id}/raw/upload`), { method: 'POST', body: form })
       if (!res.ok) throw new Error(`Server error: ${res.status}`)
       const data = (await res.json()) as { uploaded: Array<{ name: string }> }
       setUploadMsg({ type: 'success', text: `Added ${data.uploaded.length} file${data.uploaded.length > 1 ? 's' : ''}` })

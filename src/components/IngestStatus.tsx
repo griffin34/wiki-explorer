@@ -2,6 +2,7 @@ import { useState, useCallback, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Loader2, CheckCircle2, XCircle, FileText, Brain, Zap, ZapOff } from 'lucide-react'
 import { useWikiSocket } from '../hooks/useWiki'
+import { api } from '../utils/api'
 import type { WsEvent } from '../types'
 
 interface IngestItem {
@@ -27,7 +28,7 @@ export default function IngestStatus({ wikiId }: Props) {
   useEffect(() => {
     async function checkHealth() {
       try {
-        const res = await fetch('/api/ai/status')
+        const res = await fetch(api('/api/ai/status'))
         if (res.ok) {
           const data = await res.json()
           setAiStatus(data.status === 'ok' || data.status === 'degraded' ? 'online' : 'offline')

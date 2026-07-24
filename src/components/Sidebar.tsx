@@ -18,6 +18,7 @@ import {
   Sparkles,
 } from 'lucide-react'
 import { useSearch, useRawFiles, useWikis } from '../hooks/useWiki'
+import { api } from '../utils/api'
 import type { WikiPageMeta, SearchResult, PageType, RawFile } from '../types'
 import { PAGE_TYPE_COLORS } from '../types'
 import IngestStatus from './IngestStatus'
@@ -200,11 +201,12 @@ function SearchResults({
 
 import { snapshotDrop, resolveDropSnapshot } from '../utils/dragDrop'
 
-function IngestSection({ wikiId, inboxExists, onUploaded }: { wikiId: string; inboxExists: boolean | null; onUploaded: () => void }) {
+function IngestSection({ wikiId, wikiPath, inboxExists, onUploaded }: { wikiId: string; wikiPath: string; inboxExists: boolean | null; onUploaded: () => void }) {
   const [tab, setTab] = useState<'upload' | 'paste'>('upload')
   const [busy, setBusy] = useState(false)
   const [success, setSuccess] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [showOutlookTip, setShowOutlookTip] = useState(false)
 
   // paste-text state
   const [pasteFilename, setPasteFilename] = useState('')
@@ -248,7 +250,7 @@ function IngestSection({ wikiId, inboxExists, onUploaded }: { wikiId: string; in
       try {
         const form = new FormData()
         for (const f of files) form.append('files', f)
-        const res = await fetch(`/api/wikis/${wikiId}/raw/upload`, { method: 'POST', body: form })
+        const res = await fetch(api(`/api/wikis/${wikiId}/raw/upload`), { method: 'POST', body: form })
         if (!res.ok) throw new Error(`Server error: ${res.status}`)
         const data = (await res.json()) as { uploaded: Array<{ name: string }> }
         showSuccess(`Added: ${data.uploaded.map((f) => f.name).join(', ')}`)
@@ -303,10 +305,22 @@ function IngestSection({ wikiId, inboxExists, onUploaded }: { wikiId: string; in
       console.log('[Drop] plainText length:', snap.plainText.length)
       console.log('[Drop] htmlText length:', snap.htmlText.length)
       console.log('[Drop] emailData length:', snap.emailData.length)
+      
+      // Detect Outlook drag (has data types but no usable files) - show tip
+      const isLikelyOutlook = snap.availableTypes.some(t => 
+        t.includes('com.microsoft') || t.includes('public.url') || t === 'text/uri-list'
+      ) && snap.stdFiles.length === 0 && snap.itemFiles.length === 0
+      
       /* v8 ignore next */
       resolveDropSnapshot(snap).then((files) => {
         console.log('[Drop] Resolved files:', files.length, files.map(f => `${f.name} (${f.type})`))
-        if (files.length) handleFilesRef.current(files)
+        if (files.length) {
+          handleFilesRef.current(files)
+        } else if (isLikelyOutlook) {
+          // No files resolved from Outlook drag - show inbox tip
+          setShowOutlookTip(true)
+          setTimeout(() => setShowOutlookTip(false), 8000)
+        }
       })
     }
 
@@ -328,7 +342,7 @@ function IngestSection({ wikiId, inboxExists, onUploaded }: { wikiId: string; in
     if (!pasteContent.trim()) return
     setBusy(true)
     try {
-      const res = await fetch(`/api/wikis/${wikiId}/raw/text`, {
+      const res = await fetch(api(`/api/wikis/${wikiId}/raw/text`), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ filename: pasteFilename, content: pasteContent }),
@@ -381,32 +395,65 @@ function IngestSection({ wikiId, inboxExists, onUploaded }: { wikiId: string; in
       </div>
 
       {tab === 'upload' ? (
-        <div
-          ref={dropZoneRef}
-          onClick={openFilePicker}
-          className={`
-            p-3 rounded-lg border-2 border-dashed cursor-pointer transition-colors text-center
-            ${nativeDragActive
-              ? 'border-[var(--accent)] bg-[var(--accent-faint)] text-[var(--accent)]'
-              : 'border-[var(--border)] text-[var(--text-muted)] hover:border-[var(--border-strong)] hover:text-[var(--text-secondary)]'
-            }
-          `}
-        >
-          <input {...getInputProps()} />
-          {busy ? (
-            <div className="flex items-center justify-center gap-2">
-              <Loader2 size={13} className="animate-spin" />
-              <span className="text-xs">Uploading…</span>
-            </div>
-          ) : (
-            <div className="flex flex-col items-center gap-1">
-              <Upload size={13} />
-              <span className="text-xs">
-                {nativeDragActive ? 'Drop files here' : 'Drop files or click to upload'}
-              </span>
+        <>
+          <div
+            ref={dropZoneRef}
+            onClick={openFilePicker}
+            className={`
+              p-3 rounded-lg border-2 border-dashed cursor-pointer transition-colors text-center
+              ${nativeDragActive
+                ? 'border-[var(--accent)] bg-[var(--accent-faint)] text-[var(--accent)]'
+                : 'border-[var(--border)] text-[var(--text-muted)] hover:border-[var(--border-strong)] hover:text-[var(--text-secondary)]'
+              }
+            `}
+          >
+            <input {...getInputProps()} />
+            {busy ? (
+              <div className="flex items-center justify-center gap-2">
+                <Loader2 size={13} className="animate-spin" />
+                <span className="text-xs">Uploading…</span>
+              </div>
+            ) : (
+              <div className="flex flex-col items-center gap-1">
+                <Upload size={13} />
+                <span className="text-xs">
+                  {nativeDragActive ? 'Drop files here' : 'Drop files or click to upload'}
+                </span>
+              </div>
+            )}
+          </div>
+          
+          {/* Outlook drag tip */}
+          {showOutlookTip && (
+            <div className="mt-1.5 p-2 bg-[var(--warning-faint)] border border-[var(--warning-border)] rounded text-xs text-[var(--warning)]">
+              <p className="font-medium mb-1">Outlook emails not captured</p>
+              <p className="text-[var(--warning)]/80">
+                Outlook for Mac uses a special format. Drop emails into the inbox folder instead:
+              </p>
+              {window.electronAPI && wikiPath && (
+                <button
+                  onClick={() => window.electronAPI?.openInboxFolder?.(wikiPath)}
+                  className="mt-1.5 flex items-center gap-1.5 text-[var(--accent)] hover:underline"
+                >
+                  <FolderOpen size={11} />
+                  Open Inbox in Finder
+                </button>
+              )}
             </div>
           )}
-        </div>
+          
+          {/* Open inbox folder link (Electron only) */}
+          {window.electronAPI && wikiPath && !showOutlookTip && (
+            <button
+              onClick={() => window.electronAPI?.openInboxFolder?.(wikiPath)}
+              className="mt-1.5 flex items-center justify-center gap-1.5 text-xs text-[var(--text-muted)] hover:text-[var(--accent)] transition-colors"
+              title="Open inbox folder in Finder — useful for Outlook email drag/drop"
+            >
+              <FolderOpen size={11} />
+              Open inbox folder
+            </button>
+          )}
+        </>
       ) : (
         <div className="space-y-1.5">
           <input
@@ -645,7 +692,7 @@ export default function Sidebar({ wikiId, pages, mode = 'wiki' }: SidebarProps) 
             <p className="px-4 pb-1.5 text-xs font-semibold text-[var(--text-muted)] uppercase tracking-wider">
               Add Source
             </p>
-            <IngestSection wikiId={wikiId} inboxExists={inboxExists} onUploaded={reloadRaw} />
+            <IngestSection wikiId={wikiId} wikiPath={wikiPath} inboxExists={inboxExists} onUploaded={reloadRaw} />
           </div>
         </>
       )}

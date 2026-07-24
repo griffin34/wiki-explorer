@@ -88,6 +88,10 @@ if (-not (Test-Path "agents\.venv")) {
 }
 & agents\.venv\Scripts\pip.exe install -q -r agents\requirements.txt
 
+# Build bundled Python agent (PyInstaller)
+Write-Host "📦 Building Python agent bundle..." -ForegroundColor Yellow
+& .\scripts\build-agent.ps1
+
 # Build the Windows app
 Write-Host "🪟 Building Windows app..." -ForegroundColor Yellow
 npm run electron:build:win

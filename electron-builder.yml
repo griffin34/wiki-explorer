@@ -10,8 +10,9 @@ files:
   - dist/**/*
   - electron/**/*.js
   - electron/**/*.js.map
-  - server/**/*.js
-  - server/**/*.js.map
+  - electron/**/*.cjs
+  - dist-server/**/*.cjs
+  - build/splash.html
   - data/**/*
   - wiki-template/**/*
   - package.json
@@ -20,13 +21,19 @@ files:
   - "!**/node_modules/.bin"
   - "!**/*.{iml,o,hprof,orig,pyc,pyo,rbc,swp,csproj,sln,xproj}"
 
+asarUnpack:
+  - dist/**/*
+  - dist-server/**/*
+  - wiki-template/**/*
+
 mac:
   category: public.app-category.productivity
   target:
-    - target: dmg
-      arch: [universal]
-    - target: zip
-      arch: [universal]
+    - dmg
+    - zip
+  # Note: Builds for current architecture by default.
+  # Universal builds disabled because bundled Python agent has arch-specific libs.
+  # To build for specific arch: electron-builder --mac --arm64 (or --x64)
   icon: build/icon.png
   darkModeSupport: true
   hardenedRuntime: true
@@ -72,5 +79,10 @@ publish: null
 extraResources:
   - from: wiki-template
     to: wiki-template
+    filter:
+      - "**/*"
+  # Bundled Python agent (created by scripts/build-agent.sh)
+  - from: dist-agent
+    to: agent
     filter:
       - "**/*"

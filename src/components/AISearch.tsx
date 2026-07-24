@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { Sparkles, Send, Loader2, BookOpen, ExternalLink, RefreshCw } from 'lucide-react'
+import { api } from '../utils/api'
 
 interface SearchSource {
   title: string
@@ -35,7 +36,7 @@ export default function AISearch() {
     if (reindexing) return
     setReindexing(true)
     try {
-      const res = await fetch(`/api/ai/wikis/${wikiId}/reindex`, { method: 'POST' })
+      const res = await fetch(api(`/api/ai/wikis/${wikiId}/reindex`), { method: 'POST' })
       const contentType = res.headers.get('content-type') || ''
       if (!contentType.includes('application/json')) {
         throw new Error('AI service not available. Start it with `./start-ai.sh`.')
@@ -78,7 +79,7 @@ export default function AISearch() {
     setLoading(true)
 
     try {
-      const res = await fetch('/api/ai/search', {
+      const res = await fetch(api('/api/ai/search'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ wiki_id: wikiId, query, top_k: 10 }),

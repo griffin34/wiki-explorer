@@ -20,9 +20,21 @@ contextBridge.exposeInMainWorld('electronAPI', {
   platform: process.platform,
   isElectron: true,
 
+  // Get the API server URL (dynamic port in production)
+  getApiUrl: () => ipcRenderer.invoke('get-api-url'),
+
+  // Get AI service status (ollama, chroma, agent, overall)
+  getAIStatus: () => ipcRenderer.invoke('get-ai-status'),
+
+  // Open inbox folder in Finder/Explorer (for Outlook drag workaround)
+  openInboxFolder: (wikiPath: string) => ipcRenderer.invoke('open-inbox-folder', wikiPath),
+  
+  // Reveal a file/folder in Finder/Explorer
+  revealInFinder: (filePath: string) => ipcRenderer.invoke('reveal-in-finder', filePath),
+
   // IPC for future use (native dialogs, notifications, etc.)
   invoke: (channel: string, ...args: unknown[]) => {
-    const allowedChannels = ['open-folder-dialog', 'show-notification']
+    const allowedChannels = ['open-folder-dialog', 'show-notification', 'open-inbox-folder', 'reveal-in-finder']
     if (allowedChannels.includes(channel)) {
       return ipcRenderer.invoke(channel, ...args)
     }
@@ -38,14 +50,28 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
 })
 
+// AI service status interface
+interface AIServiceStatus {
+  ollama: 'starting' | 'ready' | 'unavailable'
+  chroma: 'starting' | 'ready' | 'unavailable'
+  agent: 'starting' | 'ready' | 'unavailable'
+  overall: 'starting' | 'ready' | 'degraded' | 'unavailable'
+}
+
 // Type declaration for the exposed API
 declare global {
   interface Window {
     electronAPI?: {
       platform: string
       isElectron: boolean
+      getApiUrl: () => Promise<string>
+      getAIStatus: () => Promise<AIServiceStatus>
       invoke: (channel: string, ...args: unknown[]) => Promise<unknown>
       send: (channel: string, ...args: unknown[]) => void
+      /** Open the inbox folder for a wiki in Finder/Explorer */
+      openInboxFolder: (wikiPath: string) => Promise<void>
+      /** Reveal a file/folder in Finder/Explorer */
+      revealInFinder: (filePath: string) => Promise<void>
     }
   }
 }

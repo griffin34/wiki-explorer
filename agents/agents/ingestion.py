@@ -164,6 +164,12 @@ class IngestionAgent:
                 )
                 self._watchers[wiki.id] = task
                 logger.info("Started inbox watcher for wiki %s at %s", wiki.id, inbox)
+                
+                # Catch-up: scan inbox for files dropped while app was offline
+                asyncio.create_task(
+                    self._inbox_catchup(wiki.id, inbox),
+                    name=f"inbox-catchup-{wiki.id}",
+                )
 
         # Auto-reindex when explicitly requested (new wikis added via UI/API)
         if auto_reindex:
@@ -297,6 +303,44 @@ class IngestionAgent:
             logger.debug("Inbox watcher for wiki %s cancelled", wiki_id)
         except Exception as exc:
             logger.error("Inbox watcher for wiki %s crashed: %s", wiki_id, exc)
+
+    async def _inbox_catchup(self, wiki_id: str, inbox_path: Path) -> None:
+        """Scan inbox for existing files dropped while app was offline.
+        
+        Called once at startup after the watcher is registered. Enqueues any
+        files currently in the inbox that haven't been processed yet.
+        """
+        try:
+            # Small delay to let startup complete
+            await asyncio.sleep(0.5)
+            
+            extensions = {
+                ".md", ".txt", ".pdf", ".docx", ".doc", ".pptx", ".ppt",
+                ".xlsx", ".xls", ".csv", ".json", ".html", ".htm", ".xml",
+                ".rst", ".rtf", ".odt", ".epub",
+            }
+            
+            def scan_inbox():
+                files = []
+                for f in inbox_path.iterdir():
+                    if f.is_file() and f.suffix.lower() in extensions:
+                        files.append(f)
+                return files
+            
+            pending_files = await asyncio.to_thread(scan_inbox)
+            
+            if pending_files:
+                logger.info(
+                    "Inbox catch-up for wiki %s: found %d pending files",
+                    wiki_id, len(pending_files)
+                )
+                for file_path in pending_files:
+                    await self.enqueue_file(wiki_id, file_path)
+            else:
+                logger.debug("Inbox catch-up for wiki %s: no pending files", wiki_id)
+                
+        except Exception as exc:
+            logger.error("Inbox catch-up failed for wiki %s: %s", wiki_id, exc)
 
     async def _watch_vaults_file(self) -> None:
         """Watch vaults.json for additions/removals and sync watchers accordingly."""

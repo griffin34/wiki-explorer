@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from typing import Union
 
 import chromadb
 
@@ -11,15 +12,36 @@ logger = logging.getLogger(__name__)
 
 
 class ChromaService:
+    """ChromaDB service with support for both HTTP and embedded modes.
+    
+    In embedded mode (chroma_embedded=True), uses PersistentClient which stores
+    data locally and doesn't require a separate ChromaDB server. This is the
+    preferred mode for packaged desktop apps.
+    
+    In HTTP mode (chroma_embedded=False), connects to a running ChromaDB server
+    at chroma_host:chroma_port. This is useful for development and deployments
+    where ChromaDB runs as a separate service.
+    """
+    
     def __init__(self) -> None:
-        self._client: chromadb.HttpClient | None = None
+        self._client: Union[chromadb.HttpClient, chromadb.PersistentClient, None] = None
 
-    def _get_client(self) -> chromadb.HttpClient:
+    def _get_client(self) -> Union[chromadb.HttpClient, chromadb.PersistentClient]:
         if self._client is None:
-            self._client = chromadb.HttpClient(
-                host=settings.chroma_host,
-                port=settings.chroma_port,
-            )
+            if settings.chroma_embedded:
+                # Embedded mode - no server needed
+                settings.chroma_path.mkdir(parents=True, exist_ok=True)
+                self._client = chromadb.PersistentClient(
+                    path=str(settings.chroma_path),
+                )
+                logger.info("ChromaDB initialized in embedded mode at %s", settings.chroma_path)
+            else:
+                # HTTP mode - connect to running server
+                self._client = chromadb.HttpClient(
+                    host=settings.chroma_host,
+                    port=settings.chroma_port,
+                )
+                logger.info("ChromaDB connected to %s:%d", settings.chroma_host, settings.chroma_port)
         return self._client
 
     def _collection_name(self, wiki_id: str) -> str:
@@ -99,8 +121,20 @@ class ChromaService:
             return 0
 
     async def check_health(self) -> bool:
+        """Check if ChromaDB is operational.
+        
+        For embedded mode, checks that the client can be initialized.
+        For HTTP mode, checks the heartbeat endpoint.
+        """
         try:
-            await asyncio.to_thread(self._get_client().heartbeat)
+            client = self._get_client()
+            if settings.chroma_embedded:
+                # Embedded mode - just verify client is accessible
+                await asyncio.to_thread(client.list_collections)
+            else:
+                # HTTP mode - use heartbeat
+                await asyncio.to_thread(client.heartbeat)
             return True
-        except Exception:
+        except Exception as exc:
+            logger.debug("ChromaDB health check failed: %s", exc)
             return False

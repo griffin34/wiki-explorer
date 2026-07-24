@@ -18,6 +18,8 @@ class Settings(BaseSettings):
     # ChromaDB
     chroma_host: str = "localhost"
     chroma_port: int = 8001
+    chroma_embedded: bool = False  # Use PersistentClient instead of HttpClient
+    chroma_path: Path = Path(__file__).parent.parent / ".chroma-data"  # Data directory for embedded mode
 
     # Agent service
     agent_port: int = 8000
@@ -30,6 +32,11 @@ class Settings(BaseSettings):
     @classmethod
     def _coerce_vaults_file(cls, v: object) -> Path:
         return Path(v) if v else Path(__file__).parent.parent / "data" / "vaults.json"
+
+    @field_validator("chroma_path", mode="before")
+    @classmethod
+    def _coerce_chroma_path(cls, v: object) -> Path:
+        return Path(v) if v else Path(__file__).parent.parent / ".chroma-data"
 
     # Ingestion
     chunk_size: int = 400  # words per chunk (conservative for nomic-embed-text 2048 token limit)

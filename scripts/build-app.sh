@@ -79,18 +79,7 @@ if ! command -v ollama &>/dev/null; then
     fi
 fi
 echo "✅ Ollama installed"
-
-# Pull required models if not present
-echo "📦 Checking Ollama models..."
-if ! ollama list 2>/dev/null | grep -q "nomic-embed-text"; then
-    echo "   Pulling nomic-embed-text (embedding model)..."
-    ollama pull nomic-embed-text
-fi
-if ! ollama list 2>/dev/null | grep -q "qwen3:8b"; then
-    echo "   Pulling qwen3:8b (chat model)..."
-    ollama pull qwen3:8b
-fi
-echo "✅ Ollama models ready"
+echo "   (Models will be pulled automatically when the app starts)"
 
 # ─── Build Steps ─────────────────────────────────────────────────────────────
 
@@ -114,6 +103,10 @@ fi
 source agents/.venv/bin/activate
 pip install -q -r agents/requirements.txt
 deactivate
+
+# Build bundled Python agent (PyInstaller)
+echo "📦 Building Python agent bundle..."
+npm run build:agent
 
 # Build the macOS app
 echo "🍎 Building macOS app..."

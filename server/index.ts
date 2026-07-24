@@ -48,12 +48,17 @@ const MAX_FILE_SIZE = 50 * 1024 * 1024
 /** Max files per upload request */
 const MAX_FILES_PER_REQUEST = 20
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url))
-// WIKI_DATA_DIR can be overridden in tests to use a temp directory
+// Handle both ESM (dev) and CJS (bundled production) modes
+const __dirname = typeof import.meta?.url !== 'undefined' 
+  ? path.dirname(fileURLToPath(import.meta.url))
+  : path.dirname(__filename)
+
+// WIKI_DATA_DIR can be overridden by Electron or in tests
 /* v8 ignore next */
 const DATA_DIR = process.env.WIKI_DATA_DIR ?? path.resolve(__dirname, '../data')
 const VAULTS_FILE = path.join(DATA_DIR, 'vaults.json')
-const WIKI_TEMPLATE_DIR = path.resolve(__dirname, '../wiki-template')
+// WIKI_TEMPLATE_DIR can be overridden by Electron for unpacked resources
+const WIKI_TEMPLATE_DIR = process.env.WIKI_TEMPLATE_DIR ?? path.resolve(__dirname, '../wiki-template')
 
 // ─── Agent Service Proxy ──────────────────────────────────────────────────────
 const AGENT_URL = process.env.AGENT_SERVICE_URL ?? 'http://localhost:8000'
@@ -893,11 +898,14 @@ watchVaults()
 
 // ─── Serve Frontend ───────────────────────────────────────────────────────────
 
-const DIST_DIR = path.resolve(__dirname, '../dist')
+// In bundled app, WIKI_FRONTEND_DIR points to the dist folder
+// In dev, it's relative to the server directory
+const DIST_DIR = process.env.WIKI_FRONTEND_DIR || path.resolve(__dirname, '../dist')
 const isProd = process.env.NODE_ENV === 'production'
 
 /* v8 ignore start */
 if (isProd && fs.existsSync(DIST_DIR)) {
+  console.log('[Server] Serving frontend from:', DIST_DIR)
   app.use(express.static(DIST_DIR))
   app.get('*', (_req, res) => {
     res.sendFile(path.join(DIST_DIR, 'index.html'))
@@ -912,13 +920,13 @@ if (isProd && fs.existsSync(DIST_DIR)) {
 // Export for integration tests (supertest uses app directly without binding a port)
 export { app }
 
-const PORT = 3001
+const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3001
 /* v8 ignore start */
 if (process.env.NODE_ENV !== 'test') {
   httpServer.listen(PORT, () => {
     const hasBuilt = fs.existsSync(DIST_DIR)
     console.log(`\n  Wiki server →  http://localhost:${PORT}`)
-    if (!hasBuilt) {
+    if (!isProd && !hasBuilt) {
       console.log(`  UI dev server → http://localhost:5173  (open this one)`)
     }
     console.log()
