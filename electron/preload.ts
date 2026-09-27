@@ -26,6 +26,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Get AI service status (ollama, chroma, agent, overall)
   getAIStatus: () => ipcRenderer.invoke('get-ai-status'),
 
+  // Save a provider's API key (encrypted at rest via Electron safeStorage)
+  saveProviderKey: (providerId: string, apiKey: string) =>
+    ipcRenderer.invoke('save-provider-key', providerId, apiKey),
+
+  // List provider ids that currently have a key configured
+  getConfiguredProviders: () => ipcRenderer.invoke('get-configured-providers'),
+
   // Open inbox folder in Finder/Explorer (for Outlook drag workaround)
   openInboxFolder: (wikiPath: string) => ipcRenderer.invoke('open-inbox-folder', wikiPath),
   
@@ -66,6 +73,8 @@ declare global {
       isElectron: boolean
       getApiUrl: () => Promise<string>
       getAIStatus: () => Promise<AIServiceStatus>
+      saveProviderKey: (providerId: string, apiKey: string) => Promise<void>
+      getConfiguredProviders: () => Promise<string[]>
       invoke: (channel: string, ...args: unknown[]) => Promise<unknown>
       send: (channel: string, ...args: unknown[]) => void
       /** Open the inbox folder for a wiki in Finder/Explorer */
