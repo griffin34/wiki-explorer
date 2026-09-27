@@ -37,7 +37,7 @@ class LLMRouter:
         self._auto_fallback = auto_fallback
 
     async def generate(self, prompt: str, system: str | None = None) -> str:
-        if self._active_id == "ollama" or self._active is None:
+        if self._active_id == "ollama":
             return await self._ollama.generate(prompt, system=system)
 
         try:
