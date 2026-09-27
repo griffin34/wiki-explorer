@@ -1,14 +1,18 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import rehypeHighlight from 'rehype-highlight'
 import rehypeRaw from 'rehype-raw'
-import { Link2, ArrowLeft, FileText, Tag, Calendar, BookOpen, Loader2, AlertCircle } from 'lucide-react'
+import { Link2, ArrowLeft, FileText, Tag, Calendar, BookOpen, Loader2, AlertCircle, Edit3, History, Eye } from 'lucide-react'
 import { useWikiPage } from '../hooks/useWiki'
 import { useTheme } from '../ThemeContext'
+import PageEditor from './PageEditor'
+import PageHistory from './PageHistory'
 import type { Components } from 'react-markdown'
 import { PAGE_TYPE_COLORS } from '../types'
+
+type PageTab = 'view' | 'edit' | 'history'
 
 /** Pre-process markdown: replace [[WikiLink]] with anchor tags */
 function processWikiLinks(content: string, wikiId: string): string {
@@ -48,6 +52,7 @@ export default function WikiPage() {
   /* v8 ignore next */
   const pageId = params['*'] || 'index'
   const { theme } = useTheme()
+  const [activeTab, setActiveTab] = useState<PageTab>('view')
 
   useEffect(() => {
     if (theme === 'brand') {
@@ -57,7 +62,12 @@ export default function WikiPage() {
     }
   }, [theme])
 
-  const { page, loading, error } = useWikiPage(wikiId, pageId)
+  const { page, loading, error, reload } = useWikiPage(wikiId, pageId)
+
+  // Reset to view tab when page changes
+  useEffect(() => {
+    setActiveTab('view')
+  }, [pageId])
 
   if (loading) {
     return (
@@ -181,19 +191,82 @@ export default function WikiPage() {
                 ))}
               </div>
             )}
+
+            {/* Tabs */}
+            <div className="flex items-center gap-1 mt-4 border-b border-[var(--border)]">
+              <button
+                onClick={() => setActiveTab('view')}
+                className={`flex items-center gap-1.5 px-3 py-2 text-sm font-medium border-b-2 transition-colors ${
+                  activeTab === 'view'
+                    ? 'border-[var(--accent)] text-[var(--accent)]'
+                    : 'border-transparent text-[var(--text-muted)] hover:text-[var(--text-primary)]'
+                }`}
+              >
+                <Eye size={14} />
+                View
+              </button>
+              <button
+                onClick={() => setActiveTab('edit')}
+                className={`flex items-center gap-1.5 px-3 py-2 text-sm font-medium border-b-2 transition-colors ${
+                  activeTab === 'edit'
+                    ? 'border-[var(--accent)] text-[var(--accent)]'
+                    : 'border-transparent text-[var(--text-muted)] hover:text-[var(--text-primary)]'
+                }`}
+              >
+                <Edit3 size={14} />
+                Edit
+              </button>
+              <button
+                onClick={() => setActiveTab('history')}
+                className={`flex items-center gap-1.5 px-3 py-2 text-sm font-medium border-b-2 transition-colors ${
+                  activeTab === 'history'
+                    ? 'border-[var(--accent)] text-[var(--accent)]'
+                    : 'border-transparent text-[var(--text-muted)] hover:text-[var(--text-primary)]'
+                }`}
+              >
+                <History size={14} />
+                History
+              </button>
+            </div>
           </div>
 
-          {/* Markdown body */}
-          <article className="wiki-prose">
-            <ReactMarkdown
-              remarkPlugins={[remarkGfm]}
-              rehypePlugins={[rehypeHighlight, rehypeRaw]}
-              components={markdownComponents}
-              skipHtml={false}
-            >
-              {processedContent}
-            </ReactMarkdown>
-          </article>
+          {/* Tab content */}
+          {activeTab === 'view' && (
+            <article className="wiki-prose">
+              <ReactMarkdown
+                remarkPlugins={[remarkGfm]}
+                rehypePlugins={[rehypeHighlight, rehypeRaw]}
+                components={markdownComponents}
+                skipHtml={false}
+              >
+                {processedContent}
+              </ReactMarkdown>
+            </article>
+          )}
+
+          {activeTab === 'edit' && (
+            <PageEditor
+              initialContent={page.content}
+              slug={pageId}
+              onSave={() => {
+                reload()
+                setActiveTab('view')
+              }}
+              onCancel={() => setActiveTab('view')}
+              startInEditMode
+            />
+          )}
+
+          {activeTab === 'history' && (
+            <PageHistory
+              slug={pageId}
+              isOpen
+              onRevert={() => {
+                reload()
+                setActiveTab('view')
+              }}
+            />
+          )}
         </div>
       </div>
 

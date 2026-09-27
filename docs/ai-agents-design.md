@@ -1,6 +1,6 @@
 # AI Agents Design — wiki-explorer
 
-> **Status:** Draft  
+> **Status:** Implemented  
 > **Stack:** Ollama · Qwen3 · ChromaDB · MarkItDown  
 > **Approach:** Python FastAPI agent service running alongside the existing Express + React app
 
@@ -18,7 +18,7 @@ Three autonomous agents extend wiki-explorer to automatically ingest documents, 
 │   │  React UI   │◄────►│  Express Server  (port 3001)         │ │
 │   │  port 5173  │      │  - Wiki REST API                     │ │
 │   └─────────────┘      │  - WebSocket file watcher            │ │
-│                         │  - /api/ai/* proxy routes  ◄── NEW  │ │
+│                         │  - /api/ai/* proxy routes            │ │
 │                         └──────────────┬───────────────────────┘ │
 │                                        │ HTTP                    │
 │                         ┌──────────────▼───────────────────────┐ │
@@ -33,7 +33,9 @@ Three autonomous agents extend wiki-explorer to automatically ingest documents, 
 │                         │  ┌─────────────────────────────────┐ │ │
 │                         │  │  Wiki Agent                     │ │ │
 │                         │  │  ChromaDB chunks → Qwen3        │ │ │
-│                         │  │  → synthesize wiki page → write │ │ │
+│                         │  │  → extract entities             │ │ │
+│                         │  │  → generate source + entity     │ │ │
+│                         │  │    pages → wiki/{type}/*.md     │ │ │
 │                         │  └─────────────────────────────────┘ │ │
 │                         │                                       │ │
 │                         │  ┌─────────────────────────────────┐ │ │
@@ -53,6 +55,8 @@ Three autonomous agents extend wiki-explorer to automatically ingest documents, 
     │  qwen3:8b           │   │  collections:     │   │  raw/inbox/   │
     │  nomic-embed-text   │   │  wiki_{id}_chunks │   │  raw/processed│
     └─────────────────────┘   └───────────────────┘   │  wiki/*.md    │
+                                                       │  wiki/people/ │
+                                                       │  wiki/tech/   │
                                                        └───────────────┘
 ```
 
@@ -219,7 +223,7 @@ WebSocket notification → UI (status update)
 
 ### 3.2 Wiki Agent
 
-**Responsibility:** Synthesize structured wiki pages from ingested document chunks using Qwen3.
+**Responsibility:** Synthesize structured wiki pages from ingested document chunks using Qwen3, including automatic **entity extraction** to create pages for people, technologies, projects, and concepts.
 
 **Trigger:**
 - Automatic — after Ingestion Agent completes a document
@@ -234,60 +238,152 @@ ChromaDB: fetch all chunks for source_file
 Build context window (ordered chunks, up to 8k tokens)
     │
     ▼
-Qwen3 prompt: "Given these source excerpts, generate a wiki page..."
-    → Structured Markdown output with frontmatter
+┌──────────────────────────────────────────────────────┐
+│  ENTITY EXTRACTION (NEW)                             │
+│                                                      │
+│  Qwen3 prompt: "Extract entities from this content"  │
+│      → JSON: { entities: [...] }                     │
+│                                                      │
+│  Entity types:                                       │
+│    • person — named individuals                      │
+│    • technology — tools, platforms, systems          │
+│    • project — named initiatives, products           │
+│    • organization — companies, teams, departments    │
+│    • concept — methodologies, domain concepts        │
+└──────────────────────────────────────────────────────┘
     │
     ▼
-Parse frontmatter: title, type, tags, links, summary
+Generate SOURCE PAGE (summary of the document)
+    → wiki/{slug}.md
     │
     ▼
-Resolve wikilinks: check existing wiki/*.md, create stubs if needed
+For each extracted entity:
+    │
+    ├─► Entity page exists?
+    │     YES → Update Related section with new source link
+    │     NO  → Generate new entity page
+    │
+    └─► Write to organized folders:
+          wiki/people/{slug}.md
+          wiki/tech/{slug}.md
+          wiki/projects/{slug}.md
+          wiki/orgs/{slug}.md
+          wiki/concepts/{slug}.md
     │
     ▼
-Write: wiki/{slug}.md
-    │
-    ▼
-Update: wiki/index.md (add to page registry)
+Update: wiki/index.md (add source page to registry)
     │
     ▼
 Update ChromaDB metadata: set wiki_page field on all source chunks
     │
     ▼
-WebSocket notification → UI (new page available)
+WebSocket notification → UI (new pages available)
 ```
 
-**Qwen3 wiki page prompt template:**
+**Entity Extraction Output:**
+
+```json
+{
+  "entities": [
+    {
+      "name": "Kara Dave",
+      "type": "person",
+      "description": "Project lead coordinating cross-team efforts",
+      "context": "Leads the Day Dotting initiative"
+    },
+    {
+      "name": "Project RIO",
+      "type": "technology",
+      "description": "Framework for mobile integration",
+      "context": "Being evaluated for system compatibility"
+    }
+  ]
+}
+```
+
+**Generated Entity Page Structure:**
+
+```markdown
+---
+title: Kara Dave
+type: entity
+entity_type: person
+tags: [person]
+sources: 1
+created: 2026-07-27
+---
+
+## Overview
+
+Kara Dave is a project lead coordinating cross-team efforts.
+
+## Role & Context
+
+<How this entity relates to the source document>
+
+## Related
+
+- [[day-dotting-project-update]] — Source document
+```
+
+**Source Page Prompt Template:**
 
 ```
-You are a personal knowledge management assistant. Generate a structured 
-wiki page from the following source excerpts.
+Source: {source_title} ({source_type})
 
-Source file: {source_title}
-Source type: {source_type}
-
-Excerpts:
 {context}
 
-Generate a wiki page in Markdown with this frontmatter:
+Generate a wiki page summarizing this source document:
+
 ---
-title: <concise descriptive title>
-type: <concept|entity|overview|analysis|source>
-tags: [<3-5 relevant tags>]
+title: {source_title}
+type: source
+tags: [source, {source_type}]
 sources: 1
-links: [<[[WikiPage]] links to related concepts>]
-created: {date}
+created: {today}
 ---
 
-Then write the page body. Be concise and factual. Use ## sections.
-Use [[WikiLink]] syntax to reference related concepts.
+## Summary
+<2-3 sentence summary>
+
+## Key Information
+<Bullet points of important facts>
+
+## People Mentioned
+<List with [[PersonName]] wiki links>
+
+## Technologies & Tools
+<List with [[TechName]] wiki links>
+
+## Related
+<List related topics with [[WikiLink]] syntax>
 ```
 
 **Page types generated:**
-- `concept` — abstract ideas, methodologies, frameworks
-- `entity` — people, organizations, products
-- `overview` — summaries of documents or topics
-- `analysis` — insights, conclusions, comparisons
-- `source` — direct reference page for a raw document
+- `source` — summary page for each ingested document
+- `entity` — auto-extracted people, technologies, projects, organizations, concepts
+
+**Entity folder structure:**
+
+```
+wiki/
+├── index.md
+├── day-dotting-project-update.md    ← source page
+├── people/
+│   ├── kara-dave.md
+│   ├── glenn-howald.md
+│   └── jason-griffin.md
+├── tech/
+│   ├── project-rio.md
+│   ├── zebra-zq620.md
+│   └── chromadb.md
+├── projects/
+│   └── automated-day-dotting.md
+├── orgs/
+│   └── starbucks.md
+└── concepts/
+    └── feasibility-testing.md
+```
 
 ---
 
@@ -308,10 +404,13 @@ Ollama embed query  (nomic-embed-text)
     │
     ▼
 ChromaDB query  (top-10, filtered by wiki_id)
-    → List[Result { text, score, metadata }]
+    → List[Result { text, distance, metadata }]
     │
     ▼
-Score threshold filter  (cosine similarity > 0.6)
+Score conversion: score = 1.0 - distance  (cosine)
+    │
+    ▼
+Score threshold filter  (score > SEARCH_SCORE_THRESHOLD, default 0.35)
     │
     ▼
 Deduplicate by source_file  (max 3 chunks per file)
@@ -335,6 +434,13 @@ Return:
   }
 ```
 
+**Configuration (agents/.env):**
+
+```env
+SEARCH_SCORE_THRESHOLD=0.35    # Lower = more results, higher = stricter matching
+SEARCH_TOP_K=10                # Max results to retrieve from ChromaDB
+```
+
 **Qwen3 RAG prompt template:**
 
 ```
@@ -348,6 +454,181 @@ Context:
 [1] {source_1_title}: {excerpt_1}
 [2] {source_2_title}: {excerpt_2}
 ...
+```
+
+---
+
+### 3.4 Edit Agent
+
+**Responsibility:** Enable both manual edits and AI-powered bulk edits to wiki pages, with full change tracking (original content, change, and change date).
+
+**Trigger:**
+- Manual — via `PUT /pages/:slug` API (UI editor)
+- AI Bulk — via `POST /edit` API with natural language instruction
+
+**Change Tracking Architecture:**
+
+Every edit is recorded in two places:
+1. **Page frontmatter** — `modified` date and `revision` number
+2. **Changelog** — `wiki/.changelog/YYYY-MM-DD.json` files with detailed before/after records
+
+```
+wiki/
+├── .changelog/
+│   ├── 2026-07-24.json       ← day's edits
+│   ├── 2026-07-23.json
+│   └── index.json            ← summary index
+├── project-team.md
+├── quarterly-review.md
+└── index.md
+```
+
+**Changelog entry schema:**
+
+```json
+{
+  "id": "edit_abc123",
+  "timestamp": "2026-07-24T14:30:00Z",
+  "type": "ai_bulk",
+  "instruction": "Jessica was replaced by Amanda on the project",
+  "changes": [
+    {
+      "page": "project-team.md",
+      "revision": 3,
+      "hunks": [
+        {
+          "line_start": 12,
+          "line_end": 12,
+          "before": "**Project Lead:** Jessica Chen",
+          "after": "**Project Lead:** Amanda Torres (replaced Jessica Chen on 2026-07-24)"
+        },
+        {
+          "line_start": 45,
+          "line_end": 47,
+          "before": "Contact Jessica for approvals.\nShe handles all budget decisions.",
+          "after": "Contact Amanda Torres for approvals.\nShe handles all budget decisions.\n\n> _Note: Amanda replaced Jessica Chen on 2026-07-24._"
+        }
+      ]
+    },
+    {
+      "page": "quarterly-review.md",
+      "revision": 2,
+      "hunks": [
+        {
+          "line_start": 8,
+          "line_end": 8,
+          "before": "Presented by Jessica Chen",
+          "after": "Presented by Jessica Chen _(now Amanda Torres)_"
+        }
+      ]
+    }
+  ],
+  "affected_pages": ["project-team.md", "quarterly-review.md"],
+  "user": "ai_agent"
+}
+```
+
+**AI Bulk Edit Pipeline:**
+
+```
+User instruction: "Jessica was replaced by Amanda on the project"
+    │
+    ▼
+Parse instruction → extract entities + intent
+    │
+    ▼
+Semantic search: find all pages mentioning "Jessica"
+    → ChromaDB query + full-text grep
+    │
+    ▼
+For each matching page:
+    │
+    ├─► Identify relevant passages (not just name occurrences)
+    │   → Context-aware: roles, responsibilities, contact info
+    │
+    ├─► Generate proposed edit via Qwen3
+    │   → Preserve historical accuracy where appropriate
+    │   → Add transition notes where helpful
+    │
+    └─► Build change preview with before/after
+    │
+    ▼
+Return edit proposal:
+    {
+      instruction: "...",
+      affected_pages: [...],
+      changes: [...],         // detailed hunks
+      preview_diff: "..."     // unified diff for UI
+    }
+    │
+    ▼
+[User approves / modifies / rejects]
+    │
+    ▼
+Apply changes:
+    → Write updated page content
+    → Update frontmatter (modified, revision++)
+    → Append to changelog
+    → Update ChromaDB embeddings for changed chunks
+    │
+    ▼
+WebSocket notification → UI
+```
+
+**Qwen3 Edit Prompt Template:**
+
+```
+You are editing a wiki page based on this instruction:
+"{instruction}"
+
+Current page content:
+---
+{page_content}
+---
+
+Entity mapping:
+- Old: {old_entity} (Jessica Chen)
+- New: {new_entity} (Amanda Torres)  
+- Change date: {change_date}
+
+Rules:
+1. Replace references to the old entity with the new entity
+2. For historical facts (past events), keep the original name but add a note
+3. For current roles/responsibilities, update to the new entity
+4. Add transition notes where context is helpful
+5. Preserve all other content exactly
+
+Output the complete updated page content.
+```
+
+**Manual Edit Flow:**
+
+For simple edits via the UI editor:
+
+```
+PUT /api/wikis/:wiki_id/pages/:slug
+{
+  "content": "updated markdown content",
+  "reason": "Fixed typo in section header"   // optional
+}
+```
+
+The server:
+1. Reads current page content
+2. Computes diff (hunks)
+3. Increments revision in frontmatter
+4. Sets `modified: <today>`
+5. Writes changelog entry (type: `manual`)
+6. Saves file
+7. Updates ChromaDB if content changed significantly
+
+**Revision History UI:**
+
+The page viewer gains a "History" tab showing:
+- Timeline of changes
+- Expandable diffs
+- "Revert to revision N" action
+- Filter by edit type (manual / ai_bulk)
 
 Answer concisely. Use markdown formatting.
 ```
@@ -368,25 +649,30 @@ wiki-explorer/
 │   │   ├── __init__.py
 │   │   ├── ingestion.py             Ingestion Agent
 │   │   ├── wiki.py                  Wiki Agent
-│   │   └── search.py                Search Agent
+│   │   ├── search.py                Search Agent
+│   │   └── edit.py                  Edit Agent (manual + AI bulk)
 │   │
 │   ├── services/
 │   │   ├── __init__.py
 │   │   ├── chroma_service.py        ChromaDB CRUD + collection management
 │   │   ├── ollama_service.py        Generate + embed via Ollama REST
-│   │   └── markitdown_service.py    Document → Markdown conversion
+│   │   ├── markitdown_service.py    Document → Markdown conversion
+│   │   └── changelog_service.py     Change tracking + revision history
 │   │
 │   └── models/
 │       ├── __init__.py
 │       └── schemas.py               Pydantic request/response models
 │
 ├── server/
-│   └── index.ts                     ADD: /api/ai/* proxy routes
+│   └── index.ts                     ADD: /api/ai/* proxy routes + edit routes
 │
 └── src/
     └── components/
         ├── AISearch.tsx             NEW: Chat-style search panel
-        └── IngestStatus.tsx         NEW: Ingestion queue badge/drawer
+        ├── AIEditPanel.tsx          NEW: Bulk edit instruction + diff preview
+        ├── IngestStatus.tsx         NEW: Ingestion queue badge/drawer
+        ├── PageEditor.tsx           NEW: Inline markdown editor
+        └── PageHistory.tsx          NEW: Revision timeline + revert
 ```
 
 ---
@@ -409,6 +695,9 @@ wiki-explorer/
 | `GET` | `/wiki/status` | Wiki generation queue across all wikis |
 | `POST` | `/search` | Semantic search + Q&A `{ wiki_id, query, top_k? }` |
 | `GET` | `/search/suggestions` | Query autocomplete `{ wiki_id, prefix }` |
+| `POST` | `/edit/preview` | Preview AI bulk edit `{ wiki_id, instruction }` → proposed changes |
+| `POST` | `/edit/apply` | Apply approved edits `{ wiki_id, edit_id, changes }` |
+| `GET` | `/edit/history` | Edit history for wiki `{ wiki_id, page?, limit? }` |
 
 ### Express Server — new proxy routes
 
@@ -421,6 +710,12 @@ The Express server adds a thin proxy layer and handles wiki lifecycle events:
 | `POST` | `/api/ai/ingest` | Proxy to `/ingest` |
 | `GET` | `/api/ai/queue` | Proxy to `/ingest/queue` |
 | `POST` | `/api/ai/wiki/generate` | Proxy to `/wiki/generate` |
+| `POST` | `/api/ai/edit/preview` | Proxy to `/edit/preview` |
+| `POST` | `/api/ai/edit/apply` | Proxy to `/edit/apply` |
+| `GET` | `/api/ai/edit/history` | Proxy to `/edit/history` |
+| `PUT` | `/api/wikis/:id/pages/:slug` | Manual page edit with changelog |
+| `GET` | `/api/wikis/:id/pages/:slug/history` | Page revision history |
+| `POST` | `/api/wikis/:id/pages/:slug/revert` | Revert to specific revision |
 
 The **existing** wiki create/delete routes in Express are updated to also call the agent service:
 
@@ -483,6 +778,34 @@ A badge in the Layout sidebar showing:
 - Idle / Watching / Processing N files
 - Expandable drawer with queue items and progress
 - Toast notifications when new wiki pages are created
+
+### `PageEditor` — inline markdown editor
+
+A toggle mode on the page viewer:
+- CodeMirror-based markdown editor with syntax highlighting
+- Live preview pane (side-by-side or toggle)
+- "Save" button with optional reason field
+- Keyboard shortcuts (Cmd+S to save, Esc to cancel)
+- Unsaved changes warning
+
+### `AIEditPanel` — bulk edit interface
+
+A command palette or dedicated panel for AI-powered edits:
+- Natural language instruction input
+- "Preview Changes" button → shows affected pages
+- Diff viewer for each proposed change
+- Checkboxes to include/exclude individual changes
+- "Apply Selected" / "Apply All" buttons
+- Progress indicator during edit application
+
+### `PageHistory` — revision timeline
+
+A history tab/drawer on each page:
+- Timeline of changes (date, type, summary)
+- Expandable unified diff for each revision
+- "Revert to this version" action
+- Filter by edit type (manual / ai_bulk)
+- Link to full changelog
 
 ---
 
@@ -575,3 +898,14 @@ A `start-ai.sh` script and updated `package.json` `dev:ai` script will orchestra
 - [ ] Error recovery: dead letter queue for failed ingestions
 - [ ] ChromaDB collection-per-wiki isolation
 - [ ] Search history persistence
+
+### Phase 6 — Edit Agent
+- [ ] `EditAgent`: instruction parsing + semantic page search
+- [ ] Qwen3 edit prompt: context-aware replacement generation
+- [ ] Changelog infrastructure: `wiki/.changelog/` + daily JSON files
+- [ ] Express manual edit routes: `PUT /pages/:slug`, `GET /pages/:slug/history`
+- [ ] Express AI edit proxy: `/api/ai/edit/preview`, `/api/ai/edit/apply`
+- [ ] `PageEditor` UI: inline markdown editor with save/cancel
+- [ ] `AIEditPanel` UI: instruction input + diff preview + apply
+- [ ] `PageHistory` UI: revision timeline + revert action
+- [ ] ChromaDB re-embedding on significant edits

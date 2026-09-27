@@ -63,6 +63,7 @@ class SearchAgent:
         for doc, meta, dist in zip(documents, metadatas, distances):
             score = max(0.0, 1.0 - dist)
             scored.append((score, doc, meta))
+            logger.debug("  Result: score=%.4f, dist=%.4f, doc=%s...", score, dist, doc[:50])
 
         # 4. Filter by threshold
         filtered = [
@@ -70,6 +71,10 @@ class SearchAgent:
             for score, doc, meta in scored
             if score >= settings.search_score_threshold
         ]
+        logger.info(
+            "Threshold %.2f: %d/%d results passed",
+            settings.search_score_threshold, len(filtered), len(scored)
+        )
 
         elapsed_ms = int((time.monotonic() - start_ms) * 1000)
 

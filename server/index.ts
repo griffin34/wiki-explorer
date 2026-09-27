@@ -603,6 +603,363 @@ app.get('/api/wikis/:id/wiki/*', (req, res) => {
   res.json({ id: pageId, frontmatter: data, content, links, backlinks })
 })
 
+// ─── Page Editing & History ───────────────────────────────────────────────────
+
+interface ChangelogEntry {
+  id: string
+  timestamp: string
+  type: 'manual' | 'ai_bulk' | 'revert'
+  instruction?: string
+  reason?: string
+  changes: Array<{
+    page: string
+    revision: number
+    hunks: Array<{
+      line_start: number
+      line_end: number
+      before: string
+      after: string
+    }>
+  }>
+  affected_pages: string[]
+  user: string
+}
+
+function getChangelogDir(v: WikiConfig): string {
+  const base = isWikiMode(v) ? wikiDir(v) : v.path
+  return path.join(base, '.changelog')
+}
+
+function ensureChangelogDir(v: WikiConfig): string {
+  const dir = getChangelogDir(v)
+  fs.mkdirSync(dir, { recursive: true })
+  return dir
+}
+
+function getTodayChangelogFile(v: WikiConfig): string {
+  const dir = ensureChangelogDir(v)
+  const today = new Date().toISOString().split('T')[0]
+  return path.join(dir, `${today}.json`)
+}
+
+function loadChangelogFile(filePath: string): ChangelogEntry[] {
+  try {
+    const raw = fs.readFileSync(filePath, 'utf-8')
+    return JSON.parse(raw) as ChangelogEntry[]
+  } catch {
+    return []
+  }
+}
+
+function saveChangelogFile(filePath: string, entries: ChangelogEntry[]): void {
+  fs.writeFileSync(filePath, JSON.stringify(entries, null, 2), 'utf-8')
+}
+
+function computeDiffHunks(before: string, after: string): Array<{ line_start: number; line_end: number; before: string; after: string }> {
+  // Simple diff: compare line by line and collect contiguous blocks of changes
+  const beforeLines = before.split('\n')
+  const afterLines = after.split('\n')
+  const hunks: Array<{ line_start: number; line_end: number; before: string; after: string }> = []
+  
+  const maxLen = Math.max(beforeLines.length, afterLines.length)
+  let i = 0
+  
+  while (i < maxLen) {
+    // Skip matching lines
+    const beforeLine = i < beforeLines.length ? beforeLines[i] : undefined
+    const afterLine = i < afterLines.length ? afterLines[i] : undefined
+    
+    if (beforeLine === afterLine) {
+      i++
+      continue
+    }
+    
+    // Found a difference, collect the hunk
+    const hunkStart = i
+    const beforeHunk: string[] = []
+    const afterHunk: string[] = []
+    
+    // Collect differing lines until we find matching lines again
+    while (i < maxLen) {
+      const bLine = i < beforeLines.length ? beforeLines[i] : undefined
+      const aLine = i < afterLines.length ? afterLines[i] : undefined
+      
+      if (bLine === aLine) break
+      
+      if (bLine !== undefined) beforeHunk.push(bLine)
+      if (aLine !== undefined) afterHunk.push(aLine)
+      i++
+    }
+    
+    if (beforeHunk.length > 0 || afterHunk.length > 0) {
+      hunks.push({
+        line_start: hunkStart + 1,
+        line_end: hunkStart + Math.max(beforeHunk.length, afterHunk.length),
+        before: beforeHunk.join('\n'),
+        after: afterHunk.join('\n'),
+      })
+    }
+  }
+  
+  return hunks
+}
+
+// Manual page edit
+app.put('/api/wikis/:id/pages/*', (req, res) => {
+  try {
+    const v = res.locals.wiki as WikiConfig
+    const rawPageId = (req.params as Record<string, string>)['0']
+    const pageId = sanitizePageId(rawPageId)
+    const baseDir = isWikiMode(v) ? wikiDir(v) : v.path
+    const filePath = path.join(baseDir, pageId + '.md')
+    
+    // Security: verify the resolved path is within the wiki directory
+    if (!isPathWithinBase(filePath, baseDir)) {
+      return res.status(400).json({ error: 'Invalid page path' })
+    }
+    
+    const { content: newContent, reason } = req.body as { content?: string; reason?: string }
+    if (typeof newContent !== 'string') {
+      return res.status(400).json({ error: 'content is required' })
+    }
+    
+    // Read current content
+    const currentRaw = safeRead(filePath)
+    if (!currentRaw) {
+      return res.status(404).json({ error: 'Page not found' })
+    }
+    
+    const { data: currentData, content: currentContent } = matter(currentRaw)
+    
+    // Update frontmatter
+    const today = new Date().toISOString().split('T')[0]
+    const currentRevision = (currentData.revision as number) || 0
+    const newRevision = currentRevision + 1
+    
+    const newData = {
+      ...currentData,
+      revision: newRevision,
+      modified: today,
+    }
+    
+    // Build new file content
+    const newFile = matter.stringify(newContent, newData)
+    
+    // Compute diff
+    const hunks = computeDiffHunks(currentContent, newContent)
+    
+    // Create changelog entry
+    const changelogEntry: ChangelogEntry = {
+      id: `edit_${randomUUID().split('-')[0]}`,
+      timestamp: new Date().toISOString(),
+      type: 'manual',
+      reason,
+      changes: [{
+        page: pageId + '.md',
+        revision: newRevision,
+        hunks,
+      }],
+      affected_pages: [pageId + '.md'],
+      user: 'user',
+    }
+    
+    // Save to changelog
+    const changelogFile = getTodayChangelogFile(v)
+    const entries = loadChangelogFile(changelogFile)
+    entries.push(changelogEntry)
+    saveChangelogFile(changelogFile, entries)
+    
+    // Write the file
+    fs.writeFileSync(filePath, newFile, 'utf-8')
+    
+    res.json({
+      success: true,
+      revision: newRevision,
+      modified: today,
+      changelogId: changelogEntry.id,
+    })
+  } catch (err) {
+    console.error('[page-edit] error:', err)
+    res.status(500).json({ error: String(err) })
+  }
+})
+
+// Page revision history
+app.get('/api/wikis/:id/pages/*/history', (req, res) => {
+  try {
+    const v = res.locals.wiki as WikiConfig
+    const rawPageId = (req.params as Record<string, string>)['0'].replace(/\/history$/, '')
+    const pageId = sanitizePageId(rawPageId)
+    const pageFile = pageId + '.md'
+    const limit = parseInt(req.query.limit as string) || 50
+    
+    const changelogDir = getChangelogDir(v)
+    if (!fs.existsSync(changelogDir)) {
+      return res.json([])
+    }
+    
+    // Read all changelog files, sorted by date descending
+    const files = fs.readdirSync(changelogDir)
+      .filter(f => f.endsWith('.json') && f !== 'index.json')
+      .sort((a, b) => b.localeCompare(a))
+    
+    const history: Array<{
+      id: string
+      timestamp: string
+      type: string
+      reason?: string
+      instruction?: string
+      revision: number
+      hunks: Array<{ line_start: number; line_end: number; before: string; after: string }>
+    }> = []
+    
+    for (const file of files) {
+      if (history.length >= limit) break
+      
+      const entries = loadChangelogFile(path.join(changelogDir, file))
+      for (const entry of entries.reverse()) {
+        if (history.length >= limit) break
+        
+        const change = entry.changes.find(c => c.page === pageFile)
+        if (change) {
+          history.push({
+            id: entry.id,
+            timestamp: entry.timestamp,
+            type: entry.type,
+            reason: entry.reason,
+            instruction: entry.instruction,
+            revision: change.revision,
+            hunks: change.hunks,
+          })
+        }
+      }
+    }
+    
+    res.json(history)
+  } catch (err) {
+    console.error('[page-history] error:', err)
+    res.status(500).json({ error: String(err) })
+  }
+})
+
+// Revert to revision
+app.post('/api/wikis/:id/pages/*/revert', (req, res) => {
+  try {
+    const v = res.locals.wiki as WikiConfig
+    const rawPageId = (req.params as Record<string, string>)['0'].replace(/\/revert$/, '')
+    const pageId = sanitizePageId(rawPageId)
+    const baseDir = isWikiMode(v) ? wikiDir(v) : v.path
+    const filePath = path.join(baseDir, pageId + '.md')
+    const pageFile = pageId + '.md'
+    
+    // Security: verify the resolved path is within the wiki directory
+    if (!isPathWithinBase(filePath, baseDir)) {
+      return res.status(400).json({ error: 'Invalid page path' })
+    }
+    
+    const { revision: targetRevision } = req.body as { revision?: number }
+    if (typeof targetRevision !== 'number') {
+      return res.status(400).json({ error: 'revision is required' })
+    }
+    
+    // Read current content
+    const currentRaw = safeRead(filePath)
+    if (!currentRaw) {
+      return res.status(404).json({ error: 'Page not found' })
+    }
+    
+    const { data: currentData, content: currentContent } = matter(currentRaw)
+    
+    // Find the target revision in changelog
+    const changelogDir = getChangelogDir(v)
+    if (!fs.existsSync(changelogDir)) {
+      return res.status(404).json({ error: 'No changelog found' })
+    }
+    
+    // Find the entry for the target revision
+    const files = fs.readdirSync(changelogDir)
+      .filter(f => f.endsWith('.json') && f !== 'index.json')
+      .sort((a, b) => b.localeCompare(a))
+    
+    let targetEntry: ChangelogEntry | null = null
+    let targetChange: ChangelogEntry['changes'][0] | null = null
+    
+    for (const file of files) {
+      const entries = loadChangelogFile(path.join(changelogDir, file))
+      for (const entry of entries) {
+        const change = entry.changes.find(c => c.page === pageFile && c.revision === targetRevision)
+        if (change) {
+          targetEntry = entry
+          targetChange = change
+          break
+        }
+      }
+      if (targetEntry) break
+    }
+    
+    if (!targetEntry || !targetChange) {
+      return res.status(404).json({ error: `Revision ${targetRevision} not found in changelog` })
+    }
+    
+    // Reconstruct the "before" state from the hunks
+    // The hunks contain the state before the target revision was applied
+    // So we use the "before" content from those hunks
+    const beforeContent = targetChange.hunks.map(h => h.before).join('\n')
+    
+    // Update frontmatter for the revert
+    const today = new Date().toISOString().split('T')[0]
+    const currentRevision = (currentData.revision as number) || 0
+    const newRevision = currentRevision + 1
+    
+    const newData = {
+      ...currentData,
+      revision: newRevision,
+      modified: today,
+    }
+    
+    // Build new file content (restoring the before state)
+    const newFile = matter.stringify(beforeContent, newData)
+    
+    // Compute diff for the revert
+    const hunks = computeDiffHunks(currentContent, beforeContent)
+    
+    // Create changelog entry for the revert
+    const revertEntry: ChangelogEntry = {
+      id: `revert_${randomUUID().split('-')[0]}`,
+      timestamp: new Date().toISOString(),
+      type: 'revert',
+      reason: `Reverted to revision ${targetRevision}`,
+      changes: [{
+        page: pageFile,
+        revision: newRevision,
+        hunks,
+      }],
+      affected_pages: [pageFile],
+      user: 'user',
+    }
+    
+    // Save to changelog
+    const changelogFile = getTodayChangelogFile(v)
+    const entries = loadChangelogFile(changelogFile)
+    entries.push(revertEntry)
+    saveChangelogFile(changelogFile, entries)
+    
+    // Write the file
+    fs.writeFileSync(filePath, newFile, 'utf-8')
+    
+    res.json({
+      success: true,
+      revision: newRevision,
+      modified: today,
+      revertedTo: targetRevision,
+      changelogId: revertEntry.id,
+    })
+  } catch (err) {
+    console.error('[page-revert] error:', err)
+    res.status(500).json({ error: String(err) })
+  }
+})
+
 // ─── Graph ────────────────────────────────────────────────────────────────────
 
 app.get('/api/wikis/:id/graph', (_req, res) => {
@@ -847,6 +1204,35 @@ app.post('/api/ai/wikis/:wikiId/reindex', async (req, res) => {
       `/wikis/${req.params.wikiId}/reindex?include_wiki_pages=${includeWikiPages}`,
       { method: 'POST' }
     )
+    res.status(r.status).json(await r.json())
+  } catch {
+    res.status(503).json({ error: 'Agent service not running' })
+  }
+})
+
+// AI Edit Proxy Routes
+app.post('/api/ai/edit/preview', async (req, res) => {
+  try {
+    const r = await proxyToAgent('/edit/preview', { method: 'POST', body: JSON.stringify(req.body) })
+    res.status(r.status).json(await r.json())
+  } catch {
+    res.status(503).json({ error: 'Agent service not running' })
+  }
+})
+
+app.post('/api/ai/edit/apply', async (req, res) => {
+  try {
+    const r = await proxyToAgent('/edit/apply', { method: 'POST', body: JSON.stringify(req.body) })
+    res.status(r.status).json(await r.json())
+  } catch {
+    res.status(503).json({ error: 'Agent service not running' })
+  }
+})
+
+app.get('/api/ai/edit/history', async (req, res) => {
+  try {
+    const query = new URLSearchParams(req.query as Record<string, string>).toString()
+    const r = await proxyToAgent(`/edit/history${query ? '?' + query : ''}`)
     res.status(r.status).json(await r.json())
   } catch {
     res.status(503).json({ error: 'Agent service not running' })

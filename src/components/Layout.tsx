@@ -1,8 +1,9 @@
 import { useState, useCallback, useEffect } from 'react'
 import { Outlet, useParams, useNavigate } from 'react-router-dom'
-import { PanelLeftClose, PanelLeftOpen, ChevronLeft, Moon } from 'lucide-react'
+import { PanelLeftClose, PanelLeftOpen, ChevronLeft, Moon, Wand2 } from 'lucide-react'
 import SirenIcon from './SirenIcon'
 import Sidebar from './Sidebar'
+import AIEditPanel from './AIEditPanel'
 import { usePageList, useWikis, useWikiSocket } from '../hooks/useWiki'
 import { useTheme } from '../ThemeContext'
 import type { WsEvent } from '../types'
@@ -14,6 +15,7 @@ export default function Layout() {
   const [sidebarWidth, setSidebarWidth] = useState(288) // w-72 = 288px
   const [isResizing, setIsResizing] = useState(false)
   const [refreshToken, setRefreshToken] = useState(0)
+  const [aiEditPanelOpen, setAiEditPanelOpen] = useState(false)
   const { theme, toggleTheme } = useTheme()
 
   const { pages, reload: reloadPages } = usePageList(wikiId)
@@ -115,6 +117,15 @@ export default function Layout() {
           <span className="ml-auto text-xs text-[var(--text-muted)]">{pages.length} pages</span>
 
           <button
+            onClick={() => setAiEditPanelOpen(true)}
+            className="flex items-center gap-1.5 px-2 py-1.5 rounded hover:bg-[var(--bg-elevated)] text-[var(--text-muted)] hover:text-[var(--accent)] transition-colors"
+            title="AI Bulk Edit"
+          >
+            <Wand2 size={15} />
+            <span className="text-xs">AI Edit</span>
+          </button>
+
+          <button
             onClick={toggleTheme}
             className="p-1.5 rounded hover:bg-[var(--bg-elevated)] text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
             title={theme === 'brand' ? 'Switch to dark theme' : 'Switch to brand theme'}
@@ -128,6 +139,16 @@ export default function Layout() {
           <Outlet context={{ refreshToken }} />
         </div>
       </main>
+
+      {/* AI Edit Panel */}
+      <AIEditPanel
+        isOpen={aiEditPanelOpen}
+        onClose={() => setAiEditPanelOpen(false)}
+        onApplyComplete={() => {
+          setRefreshToken((v) => v + 1)
+          reloadPages()
+        }}
+      />
     </div>
   )
 }

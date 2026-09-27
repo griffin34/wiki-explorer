@@ -145,6 +145,29 @@ class MarkItDownService:
         file_path = Path(file_path)
         source_type = file_path.suffix.lstrip(".").lower() or "unknown"
         
+        # Markdown files - just read them directly, no conversion needed
+        if source_type in ("md", "markdown"):
+            try:
+                text = file_path.read_text(encoding="utf-8")
+                # Try to extract title from first heading
+                title = file_path.stem
+                for line in text.split("\n"):
+                    line = line.strip()
+                    if line.startswith("# "):
+                        title = line[2:].strip()
+                        break
+                return ConversionResult(text=text, title=title, source_type=source_type)
+            except Exception as exc:
+                raise RuntimeError(f"Failed to read markdown file {file_path.name}: {exc}") from exc
+        
+        # Plain text files - just read them directly
+        if source_type in ("txt", "text"):
+            try:
+                text = file_path.read_text(encoding="utf-8")
+                return ConversionResult(text=text, title=file_path.stem, source_type=source_type)
+            except Exception as exc:
+                raise RuntimeError(f"Failed to read text file {file_path.name}: {exc}") from exc
+        
         # Use built-in email parser for .eml files
         if source_type == "eml":
             try:

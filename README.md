@@ -10,7 +10,8 @@ A local-first personal wiki viewer with AI-powered semantic search. Build your s
 - **📚 Personal Wiki Management** — Organize knowledge across multiple wikis with custom colors and names
 - **🔍 AI Semantic Search** — Find content by meaning, not just keywords, using local embeddings
 - **🕸️ Knowledge Graph** — Visualize connections between your notes with an interactive graph
-- **📥 Inbox Ingestion** — Drop files (PDF, DOCX, etc.) into your inbox for automatic processing
+- **📥 Inbox Ingestion** — Drop files (PDF, DOCX, emails) into your inbox for automatic processing
+- **🤖 Entity Extraction** — AI automatically identifies people, technologies, projects and creates wiki pages for each
 - **🎨 Beautiful UI** — Dark mode with Catppuccin theme, clean typography
 - **🔒 Fully Local** — All data stays on your machine, no cloud services required
 - **⚡ Self-Contained** — Desktop app auto-starts all AI services

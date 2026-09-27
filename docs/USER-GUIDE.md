@@ -276,15 +276,28 @@ Drop files into your wiki's `raw/inbox/` folder for automatic processing:
 - Word documents (.docx)
 - PowerPoint presentations (.pptx)
 - Excel spreadsheets (.xlsx)
-- Outlook emails (.msg)
+- Outlook emails (.msg, .eml)
 - Plain text files
 
 **What happens:**
 1. AI extracts text content using `markitdown`
 2. Content is summarized and converted to markdown
-3. New page is created in your wiki
-4. Content is indexed for semantic search
-5. Original file is archived
+3. **Entities are extracted** — people, technologies, projects, organizations
+4. New **source page** is created summarizing the document
+5. New **entity pages** are created for each extracted entity:
+   - `wiki/people/` — People mentioned
+   - `wiki/tech/` — Technologies, tools, platforms
+   - `wiki/projects/` — Named projects and initiatives
+   - `wiki/orgs/` — Companies, teams, departments
+   - `wiki/concepts/` — Key concepts and methodologies
+6. Content is indexed for semantic search
+7. Original file is archived to `raw/processed/`
+
+**Example:** Drop a meeting email into inbox and get:
+- `wiki/project-meeting-notes.md` — Summary page
+- `wiki/people/kara-dave.md` — Person page
+- `wiki/tech/project-rio.md` — Technology page
+- `wiki/projects/automated-day-dotting.md` — Project page
 
 <!-- TODO: Add screenshot of inbox processing -->
 ![Inbox Processing](./images/inbox-processing.png)
