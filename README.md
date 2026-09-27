@@ -85,7 +85,9 @@ The built app will be in the `app/` folder:
 - **Frontend**: React, TypeScript, Tailwind CSS, Vite
 - **Backend**: Express.js, Node.js
 - **Desktop**: Electron
-- **AI**: Ollama (qwen3:8b), ChromaDB, nomic-embed-text
+- **AI**: Ollama (qwen3:8b, always used for embeddings; default/local generation),
+  plus optional Claude / OpenAI / xAI for generation if you'd rather use your own
+  subscription — ChromaDB for vector storage, nomic-embed-text for embeddings
 - **Python**: FastAPI, markitdown
 
 ## License

@@ -555,6 +555,40 @@ class OllamaService:
 - Timeout: 120 seconds
 - Base URL: `http://localhost:11434`
 
+#### LLMRouter (`agents/services/llm_router.py`)
+
+The single `generate()`/`embed()` entry point every agent depends on —
+`IngestionAgent`, `SearchAgent`, `WikiAgent`, and `EditAgent` all hold an
+`LLMRouter`, not an `OllamaService`, directly.
+
+- `embed()` always delegates to `OllamaService` — no cloud provider here
+  offers embeddings, so this never varies with the active provider.
+- `generate()` routes to whichever provider is configured active
+  (`agents/services/llm_providers/registry.py`): `ollama` (default),
+  `anthropic` (Claude), `openai`, or `xai` (Grok, via the OpenAI-compatible
+  adapter). On a transient error (rate limit, 5xx, network) it falls back
+  to Ollama if `auto_fallback_to_ollama` is enabled, emitting an
+  `ai:fallback` WebSocket event. On an auth/config error (bad or revoked
+  key) it never falls back — the error surfaces to the caller so the user
+  can fix their key.
+
+Settings persist in `data/ai-settings.json` (provider, model, fallback
+toggle — no secrets) via `agents/services/ai_settings_service.py`. API keys
+live only in the running process's memory (`main._api_keys`), populated
+from `ANTHROPIC_API_KEY`/`OPENAI_API_KEY`/`XAI_API_KEY` env vars at startup
+or set live via `POST /settings`. See "Configuration Files" below for how
+Electron injects these.
+
+#### AnthropicService / OpenAICompatibleService (`agents/services/llm_providers/`)
+
+Thin adapters implementing the same `generate(prompt, system=None) -> str`
+shape as `OllamaService`, plus a `list_models()` method used only by
+Settings (never by generation) to populate the model dropdown from each
+provider's live model list — no model IDs are hard-coded anywhere in the
+app. `OpenAICompatibleService` backs both OpenAI and xAI, since xAI's API
+is wire-compatible with the OpenAI SDK (same client, different
+`base_url`).
+
 #### MarkItDownService (`agents/services/markitdown_service.py`)
 
 Document conversion using Microsoft's markitdown library:
