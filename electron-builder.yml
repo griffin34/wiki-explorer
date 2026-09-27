@@ -1,0 +1,88 @@
+appId: com.wiki-explorer.app
+productName: Wiki Explorer
+copyright: Copyright © 2026
+
+directories:
+  output: app
+  buildResources: build
+
+files:
+  - dist/**/*
+  - electron/**/*.js
+  - electron/**/*.js.map
+  - electron/**/*.cjs
+  - dist-server/**/*.cjs
+  - build/splash.html
+  - data/**/*
+  - wiki-template/**/*
+  - package.json
+  - "!**/node_modules/*/{CHANGELOG.md,README.md,README,readme.md,readme}"
+  - "!**/node_modules/*/{test,__tests__,tests,powered-test,example,examples}"
+  - "!**/node_modules/.bin"
+  - "!**/*.{iml,o,hprof,orig,pyc,pyo,rbc,swp,csproj,sln,xproj}"
+
+asarUnpack:
+  - dist/**/*
+  - dist-server/**/*
+  - wiki-template/**/*
+
+mac:
+  category: public.app-category.productivity
+  target:
+    - dmg
+    - zip
+  # Note: Builds for current architecture by default.
+  # Universal builds disabled because bundled Python agent has arch-specific libs.
+  # To build for specific arch: electron-builder --mac --arm64 (or --x64)
+  icon: build/icon.png
+  darkModeSupport: true
+  hardenedRuntime: true
+  gatekeeperAssess: false
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.plist
+
+dmg:
+  artifactName: "${productName}-${version}-${arch}.${ext}"
+  icon: build/icon.png
+  contents:
+    - x: 130
+      y: 220
+    - x: 410
+      y: 220
+      type: link
+      path: /Applications
+
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+  icon: build/icon.png
+
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  artifactName: "${productName}-Setup-${version}.${ext}"
+
+linux:
+  target:
+    - target: AppImage
+      arch: [x64]
+    - target: deb
+      arch: [x64]
+  category: Office
+  icon: build/icon.png
+
+# Don't publish to any update server by default
+publish: null
+
+# Extra resources to include
+extraResources:
+  - from: wiki-template
+    to: wiki-template
+    filter:
+      - "**/*"
+  # Bundled Python agent (created by scripts/build-agent.sh)
+  - from: dist-agent
+    to: agent
+    filter:
+      - "**/*"

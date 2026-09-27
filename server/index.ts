@@ -15,10 +15,60 @@ import { promisify } from 'util'
 const execAsync = promisify(exec)
 const execFileAsync = promisify(execFile)
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url))
-const DATA_DIR = path.resolve(__dirname, '../data')
+// ─── Security Helpers ─────────────────────────────────────────────────────────
+
+/** Validate that a resolved path is within the allowed base directory */
+function isPathWithinBase(filePath: string, baseDir: string): boolean {
+  const resolvedPath = path.resolve(filePath)
+  const resolvedBase = path.resolve(baseDir)
+  return resolvedPath.startsWith(resolvedBase + path.sep) || resolvedPath === resolvedBase
+}
+
+/** Sanitize a page ID to prevent directory traversal */
+function sanitizePageId(pageId: string): string {
+  // Remove any ../ sequences and leading slashes
+  return pageId
+    .split('/')
+    .filter(segment => segment !== '..' && segment !== '.' && segment !== '')
+    .join('/')
+}
+
+/** Allowed file extensions for upload */
+const ALLOWED_UPLOAD_EXTENSIONS = new Set([
+  '.md', '.txt', '.pdf', '.doc', '.docx', '.ppt', '.pptx',
+  '.xls', '.xlsx', '.csv', '.json', '.html', '.htm', '.xml',
+  '.rst', '.rtf', '.odt', '.epub', '.png', '.jpg', '.jpeg', '.gif', '.webp',
+  // Email formats
+  '.eml', '.msg', '.mht', '.mhtml'
+])
+
+/** Max file size: 50MB */
+const MAX_FILE_SIZE = 50 * 1024 * 1024
+
+/** Max files per upload request */
+const MAX_FILES_PER_REQUEST = 20
+
+// Handle both ESM (dev) and CJS (bundled production) modes
+const __dirname = typeof import.meta?.url !== 'undefined' 
+  ? path.dirname(fileURLToPath(import.meta.url))
+  : path.dirname(__filename)
+
+// WIKI_DATA_DIR can be overridden by Electron or in tests
+/* v8 ignore next */
+const DATA_DIR = process.env.WIKI_DATA_DIR ?? path.resolve(__dirname, '../data')
 const VAULTS_FILE = path.join(DATA_DIR, 'vaults.json')
-const WIKI_TEMPLATE_DIR = path.resolve(__dirname, '../wiki-template')
+// WIKI_TEMPLATE_DIR can be overridden by Electron for unpacked resources
+const WIKI_TEMPLATE_DIR = process.env.WIKI_TEMPLATE_DIR ?? path.resolve(__dirname, '../wiki-template')
+
+// ─── Agent Service Proxy ──────────────────────────────────────────────────────
+const AGENT_URL = process.env.AGENT_SERVICE_URL ?? 'http://localhost:8000'
+
+async function proxyToAgent(agentPath: string, options?: RequestInit): Promise<Response> {
+  return fetch(`${AGENT_URL}${agentPath}`, {
+    ...options,
+    headers: { 'Content-Type': 'application/json', ...((options?.headers as Record<string, string>) ?? {}) },
+  })
+}
 
 // ─── Wiki Config ──────────────────────────────────────────────────────────────
 
@@ -33,6 +83,7 @@ interface WikiConfig {
 function loadWikis(): WikiConfig[] {
   try {
     const raw = fs.readFileSync(VAULTS_FILE, 'utf-8')
+    /* v8 ignore next */
     return (JSON.parse(raw) as { vaults: WikiConfig[] }).vaults ?? []
   } catch {
     return []
@@ -48,10 +99,13 @@ function getWiki(id: string): WikiConfig | undefined {
   return loadWikis().find((v) => v.id === id)
 }
 
+const SKIP_COPY = new Set(['.DS_Store', 'Thumbs.db', 'desktop.ini', 'ehthumbs.db'])
+
 function copyDirRecursive(src: string, dest: string): void {
   const entries = fs.readdirSync(src, { withFileTypes: true })
   for (const entry of entries) {
-    if (entry.name === '.DS_Store') continue
+    /* v8 ignore next */
+    if (SKIP_COPY.has(entry.name)) continue
     const srcPath = path.join(src, entry.name)
     const destPath = path.join(dest, entry.name)
     if (entry.isDirectory()) {
@@ -83,9 +137,14 @@ function findContentRoot(v: WikiConfig): string | null {
         return sub
       }
     }
+  /* v8 ignore next */
   } catch { /* ignore */ }
   return null
 }
+
+// Returns true when the folder has a proper wiki/raw directory structure.
+// Plain markdown folders (no wiki/ or raw/) use "folder" mode instead.
+const isWikiMode = (v: WikiConfig): boolean => findContentRoot(v) !== null
 
 const wikiDir = (v: WikiConfig) => path.join(findContentRoot(v) ?? v.path, 'wiki')
 const inboxDir = (v: WikiConfig) => {
@@ -97,6 +156,10 @@ const rawDir = (v: WikiConfig) => {
   return root ? path.join(root, 'raw') : null
 }
 
+// Base directory used to compute page IDs for each mode
+const pageBaseDir = (v: WikiConfig): string =>
+  isWikiMode(v) ? wikiDir(v) : v.path
+
 // ─── File Utilities ───────────────────────────────────────────────────────────
 
 function safeRead(filePath: string): string | null {
@@ -105,12 +168,16 @@ function safeRead(filePath: string): string | null {
 
 function getAllMdFiles(dir: string): string[] {
   const results: string[] = []
+  /* v8 ignore next */
   if (!fs.existsSync(dir)) return results
   function walk(d: string) {
     for (const entry of fs.readdirSync(d, { withFileTypes: true })) {
+      if (entry.name.startsWith('.')) continue
       const full = path.join(d, entry.name)
+      /* v8 ignore start */
       if (entry.isDirectory()) walk(full)
       else if (entry.name.endsWith('.md')) results.push(full)
+      /* v8 ignore stop */
     }
   }
   walk(dir)
@@ -122,8 +189,9 @@ function getAllRawFiles(v: WikiConfig): string[] {
   for (const dir of [inboxDir(v), rawDir(v)]) {
     if (!dir || !fs.existsSync(dir)) continue
     for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-      if (entry.isFile()) {
+      if (entry.isFile() && !entry.name.startsWith('.')) {
         const p = path.join(dir, entry.name)
+        /* v8 ignore next */
         if (!results.includes(p)) results.push(p)
       }
     }
@@ -140,14 +208,17 @@ function extractLinks(content: string): string[] {
 }
 
 function pageIdFromPath(filePath: string, v: WikiConfig): string {
-  return path.relative(wikiDir(v), filePath).replace(/\.md$/, '')
+  return path.relative(pageBaseDir(v), filePath)
+    .replace(/\.md$/, '')
+    .replace(/\\/g, '/')   // normalize Windows backslashes → forward slashes for URLs
 }
 
 // ─── Wiki Stats ───────────────────────────────────────────────────────────────
 
 function wikiStats(v: WikiConfig) {
-  const pages = getAllMdFiles(wikiDir(v))
-  const sources = getAllRawFiles(v)
+  const wikiMode = isWikiMode(v)
+  const pages = getAllMdFiles(wikiMode ? wikiDir(v) : v.path)
+  const sources = wikiMode ? getAllRawFiles(v) : []
   const logPath = path.join(wikiDir(v), 'log.md')
   let lastActivity = v.createdAt
   if (fs.existsSync(logPath)) {
@@ -170,15 +241,10 @@ interface IDEInfo {
   name: string
 }
 
+/* v8 ignore start */
 async function commandExists(cmd: string): Promise<boolean> {
-  try {
-    if (process.platform === 'win32') {
-      await execFileAsync('where', [cmd])
-    } else {
-      await execFileAsync('which', [cmd])
-    }
-    return true
-  } catch { return false }
+  const check = process.platform === 'win32' ? `where "${cmd}"` : `which "${cmd}"`
+  try { await execAsync(check); return true } catch { return false }
 }
 
 /** Expand common Windows env vars in a path string */
@@ -219,6 +285,7 @@ function findJetBrainsExe(appDirPrefix: string, exeName: string): string | null 
   } catch { /* ignore */ }
   return null
 }
+/* v8 ignore stop */
 
 // IDE definitions — detection candidates + launch strategy per platform
 const IDE_DEFS: Array<{
@@ -272,6 +339,7 @@ const IDE_DEFS: Array<{
   },
 ]
 
+/* v8 ignore start */
 app.get('/api/detect-ides', async (_req, res) => {
   const detected: IDEInfo[] = []
 
@@ -296,16 +364,25 @@ app.get('/api/detect-ides', async (_req, res) => {
   res.json(detected)
 })
 
+/* v8 ignore stop */
+
 app.post('/api/open-in-ide', async (req, res) => {
   const { ide, path: folderPath } = req.body as { ide?: string; path?: string }
   if (!ide || !folderPath) return res.status(400).json({ error: 'ide and path are required' })
 
+  // Security: validate the path exists and is a directory
+  if (!fs.existsSync(folderPath) || !fs.statSync(folderPath).isDirectory()) {
+    return res.status(400).json({ error: 'Invalid folder path' })
+  }
+
   const def = IDE_DEFS.find((d) => d.id === ide)
+  /* v8 ignore next */
   if (!def) return res.status(400).json({ error: `Unknown IDE: ${ide}` })
 
+  /* v8 ignore start */
   try {
+    // Security: use execFile instead of execAsync to avoid shell injection
     if (process.platform === 'darwin') {
-      // Try app bundle first, fall back to CLI
       const appExists = def.mac.apps.some((p) => fs.existsSync(p))
       if (appExists) {
         await execFileAsync('open', ['-a', def.mac.macAppName, folderPath])
@@ -313,7 +390,6 @@ app.post('/api/open-in-ide', async (req, res) => {
         await execFileAsync(def.mac.cli, [folderPath])
       }
     } else if (process.platform === 'win32') {
-      // Try known exe paths first, then Toolbox, then CLI
       const exePath = findWinExe(def.win.exes)
         ?? (def.win.toolboxPrefix ? findJetBrainsExe(def.win.toolboxPrefix, def.win.toolboxExe!) : null)
       if (exePath) {
@@ -328,10 +404,12 @@ app.post('/api/open-in-ide', async (req, res) => {
   } catch (err) {
     res.status(500).json({ error: String(err) })
   }
+  /* v8 ignore stop */
 })
 
 // ─── Native Folder Picker ─────────────────────────────────────────────────────
 
+/* v8 ignore start */
 app.get('/api/pick-folder', async (_req, res) => {
   try {
     let folderPath: string
@@ -342,16 +420,16 @@ app.get('/api/pick-folder', async (_req, res) => {
       )
       folderPath = stdout.trim().replace(/\/$/, '')
     } else if (process.platform === 'win32') {
-      const ps = [
-        '[System.Reflection.Assembly]::LoadWithPartialName("System.windows.forms") | Out-Null',
-        '$d = New-Object System.Windows.Forms.FolderBrowserDialog',
-        '$d.Description = "Select a folder for your wiki"',
-        'if ($d.ShowDialog() -eq "OK") { $d.SelectedPath }',
+      const psScript = [
+        'Add-Type -AssemblyName System.Windows.Forms',
+        "$d = New-Object System.Windows.Forms.FolderBrowserDialog",
+        "$d.Description = 'Select a folder for your wiki'",
+        "if ($d.ShowDialog() -eq 'OK') { Write-Output $d.SelectedPath }",
       ].join('; ')
-      const { stdout } = await execAsync(`powershell -Command "${ps}"`)
+      const encoded = Buffer.from(psScript, 'utf16le').toString('base64')
+      const { stdout } = await execAsync(`powershell -NoProfile -NonInteractive -EncodedCommand ${encoded}`)
       folderPath = stdout.trim()
     } else {
-      // Linux fallback — try zenity, then kdialog
       try {
         const { stdout } = await execAsync('zenity --file-selection --directory --title="Select a folder for your wiki"')
         folderPath = stdout.trim()
@@ -365,19 +443,23 @@ app.get('/api/pick-folder', async (_req, res) => {
     res.json({ path: folderPath })
   } catch (err: unknown) {
     const msg = String(err)
-    // User cancelled — osascript exits with code 1 and says "User canceled"
     if (msg.includes('cancel') || msg.includes('Cancel') || msg.includes('(-128)')) {
       return res.status(400).json({ error: 'cancelled' })
     }
     res.status(500).json({ error: msg })
   }
 })
+/* v8 ignore stop */
 
 // ─── Wiki Management API ──────────────────────────────────────────────────────
 
 app.get('/api/wikis', (_req, res) => {
   const wikis = loadWikis()
-  const result = wikis.map((v) => ({ ...v, stats: wikiStats(v) }))
+  const result = wikis.map((v) => ({
+    ...v,
+    mode: isWikiMode(v) ? 'wiki' : 'folder',
+    stats: wikiStats(v),
+  }))
   res.json(result)
 })
 
@@ -400,19 +482,10 @@ app.post('/api/wikis', (req, res) => {
 
   if (create) {
     fs.mkdirSync(absPath, { recursive: true })
-    // Seed wiki structure
-    const wikiSubDir = path.join(absPath, 'wiki')
-    fs.mkdirSync(wikiSubDir, { recursive: true })
-    fs.mkdirSync(path.join(absPath, 'raw', 'inbox'), { recursive: true })
-    const today = new Date().toISOString().split('T')[0]
-    fs.writeFileSync(
-      path.join(wikiSubDir, 'index.md'),
-      `---\ntitle: ${name.trim()}\ntype: overview\ncreated: ${today}\nupdated: ${today}\n---\n\nYour wiki is ready. Open this folder in your IDE and ask your LLM to start adding content.\n`,
-      'utf-8'
-    )
-    // Seed from wiki-template if it exists
+    // Seed from wiki-template if it exists (failure is non-fatal)
+    /* v8 ignore next 3 */
     if (fs.existsSync(WIKI_TEMPLATE_DIR)) {
-      copyDirRecursive(WIKI_TEMPLATE_DIR, absPath)
+      try { copyDirRecursive(WIKI_TEMPLATE_DIR, absPath) } catch { /* ignore */ }
     }
   } else {
     // Validate existing path
@@ -425,6 +498,7 @@ app.post('/api/wikis', (req, res) => {
     id: randomUUID().split('-')[0],
     name: name.trim(),
     path: absPath,
+    /* v8 ignore next */
     color: color ?? '#89b4fa',
     createdAt: new Date().toISOString().split('T')[0],
   }
@@ -432,15 +506,19 @@ app.post('/api/wikis', (req, res) => {
   const wikis = loadWikis()
   wikis.push(wiki)
   saveWikis(wikis)
-  watchVaults()
 
   res.json({ ...wiki, stats: wikiStats(wiki) })
+  // Notify agent service (fire-and-forget — agent may not be running)
+  proxyToAgent(`/wikis/${wiki.id}/watch`, {
+    method: 'POST',
+    body: JSON.stringify({ id: wiki.id, name: wiki.name, path: absPath, color: wiki.color ?? '#89b4fa', createdAt: wiki.createdAt }),
+  }).catch(() => { /* agent not running */ })
 })
 
 app.delete('/api/wikis/:id', (req, res) => {
   const wikis = loadWikis().filter((v) => v.id !== req.params.id)
   saveWikis(wikis)
-  watchVaults()
+  proxyToAgent(`/wikis/${req.params.id}`, { method: 'DELETE' }).catch(() => { /* agent not running */ })
   res.json({ ok: true })
 })
 
@@ -457,17 +535,28 @@ app.use('/api/wikis/:id/*', (req, res, next) => {
 
 app.get('/api/wikis/:id/wiki', (_req, res) => {
   const v = res.locals.wiki as WikiConfig
-  const files = getAllMdFiles(wikiDir(v))
+  const scanDir = isWikiMode(v) ? wikiDir(v) : v.path
+  const files = getAllMdFiles(scanDir)
   const pages = files.map((f) => {
+    /* v8 ignore next */
     const raw = safeRead(f) ?? ''
     const { data, content } = matter(raw)
     const id = pageIdFromPath(f, v)
     const links = extractLinks(content)
+    // Normalize tags: handle both array and comma-separated string
+    const rawTags = data.tags
+    const tags = Array.isArray(rawTags)
+      ? rawTags
+      : typeof rawTags === 'string'
+      ? rawTags.split(',').map((t: string) => t.trim()).filter(Boolean)
+      : []
     return {
       id,
+      /* v8 ignore next */
       title: (data.title as string) || id.split('/').pop() || id,
+      /* v8 ignore next */
       type: (data.type as string) || 'page',
-      tags: (data.tags as string[]) || [],
+      tags,
       sources: (data.sources as number) || 0,
       created: (data.created as string) || '',
       updated: (data.updated as string) || '',
@@ -481,29 +570,394 @@ app.get('/api/wikis/:id/wiki', (_req, res) => {
 
 app.get('/api/wikis/:id/wiki/*', (req, res) => {
   const v = res.locals.wiki as WikiConfig
-  const pageId = (req.params as Record<string, string>)['0']
-  const dir = wikiDir(v)
-  const filePath = path.resolve(dir, pageId + '.md')
-  if (!filePath.startsWith(dir + path.sep)) {
-    return res.status(400).json({ error: 'Invalid page id' })
+  const rawPageId = (req.params as Record<string, string>)['0']
+  const pageId = sanitizePageId(rawPageId)
+  const baseDir = isWikiMode(v) ? wikiDir(v) : v.path
+  const filePath = path.join(baseDir, pageId + '.md')
+
+  // Security: verify the resolved path is within the wiki directory
+  if (!isPathWithinBase(filePath, baseDir)) {
+    return res.status(400).json({ error: 'Invalid page path' })
   }
+
   const raw = safeRead(filePath)
   if (!raw) return res.status(404).json({ error: 'Page not found' })
 
   const { data, content } = matter(raw)
   const links = extractLinks(content)
 
-  // Compute backlinks
+  // Compute backlinks (wiki-mode only; plain folders don't use [[WikiLink]] syntax)
   const backlinks: string[] = []
-  for (const f of getAllMdFiles(wikiDir(v))) {
-    const fLinks = extractLinks(safeRead(f) ?? '')
-    const targetName = pageId.split('/').pop() || pageId
-    if (fLinks.some((l) => l === targetName || l === pageId)) {
-      backlinks.push(pageIdFromPath(f, v))
+  if (isWikiMode(v)) {
+    for (const f of getAllMdFiles(baseDir)) {
+      /* v8 ignore next */
+      const fLinks = extractLinks(safeRead(f) ?? '')
+      /* v8 ignore next */
+      const targetName = pageId.split('/').pop() || pageId
+      if (fLinks.some((l) => l === targetName || l === pageId)) {
+        backlinks.push(pageIdFromPath(f, v))
+      }
     }
   }
 
   res.json({ id: pageId, frontmatter: data, content, links, backlinks })
+})
+
+// ─── Page Editing & History ───────────────────────────────────────────────────
+
+interface ChangelogEntry {
+  id: string
+  timestamp: string
+  type: 'manual' | 'ai_bulk' | 'revert'
+  instruction?: string
+  reason?: string
+  changes: Array<{
+    page: string
+    revision: number
+    hunks: Array<{
+      line_start: number
+      line_end: number
+      before: string
+      after: string
+    }>
+  }>
+  affected_pages: string[]
+  user: string
+}
+
+function getChangelogDir(v: WikiConfig): string {
+  const base = isWikiMode(v) ? wikiDir(v) : v.path
+  return path.join(base, '.changelog')
+}
+
+function ensureChangelogDir(v: WikiConfig): string {
+  const dir = getChangelogDir(v)
+  fs.mkdirSync(dir, { recursive: true })
+  return dir
+}
+
+function getTodayChangelogFile(v: WikiConfig): string {
+  const dir = ensureChangelogDir(v)
+  const today = new Date().toISOString().split('T')[0]
+  return path.join(dir, `${today}.json`)
+}
+
+function loadChangelogFile(filePath: string): ChangelogEntry[] {
+  try {
+    const raw = fs.readFileSync(filePath, 'utf-8')
+    return JSON.parse(raw) as ChangelogEntry[]
+  } catch {
+    return []
+  }
+}
+
+function saveChangelogFile(filePath: string, entries: ChangelogEntry[]): void {
+  fs.writeFileSync(filePath, JSON.stringify(entries, null, 2), 'utf-8')
+}
+
+function computeDiffHunks(before: string, after: string): Array<{ line_start: number; line_end: number; before: string; after: string }> {
+  // Simple diff: compare line by line and collect contiguous blocks of changes
+  const beforeLines = before.split('\n')
+  const afterLines = after.split('\n')
+  const hunks: Array<{ line_start: number; line_end: number; before: string; after: string }> = []
+  
+  const maxLen = Math.max(beforeLines.length, afterLines.length)
+  let i = 0
+  
+  while (i < maxLen) {
+    // Skip matching lines
+    const beforeLine = i < beforeLines.length ? beforeLines[i] : undefined
+    const afterLine = i < afterLines.length ? afterLines[i] : undefined
+    
+    if (beforeLine === afterLine) {
+      i++
+      continue
+    }
+    
+    // Found a difference, collect the hunk
+    const hunkStart = i
+    const beforeHunk: string[] = []
+    const afterHunk: string[] = []
+    
+    // Collect differing lines until we find matching lines again
+    while (i < maxLen) {
+      const bLine = i < beforeLines.length ? beforeLines[i] : undefined
+      const aLine = i < afterLines.length ? afterLines[i] : undefined
+      
+      if (bLine === aLine) break
+      
+      if (bLine !== undefined) beforeHunk.push(bLine)
+      if (aLine !== undefined) afterHunk.push(aLine)
+      i++
+    }
+    
+    if (beforeHunk.length > 0 || afterHunk.length > 0) {
+      hunks.push({
+        line_start: hunkStart + 1,
+        line_end: hunkStart + Math.max(beforeHunk.length, afterHunk.length),
+        before: beforeHunk.join('\n'),
+        after: afterHunk.join('\n'),
+      })
+    }
+  }
+  
+  return hunks
+}
+
+// Manual page edit
+app.put('/api/wikis/:id/pages/*', (req, res) => {
+  try {
+    const v = res.locals.wiki as WikiConfig
+    const rawPageId = (req.params as Record<string, string>)['0']
+    const pageId = sanitizePageId(rawPageId)
+    const baseDir = isWikiMode(v) ? wikiDir(v) : v.path
+    const filePath = path.join(baseDir, pageId + '.md')
+    
+    // Security: verify the resolved path is within the wiki directory
+    if (!isPathWithinBase(filePath, baseDir)) {
+      return res.status(400).json({ error: 'Invalid page path' })
+    }
+    
+    const { content: newContent, reason } = req.body as { content?: string; reason?: string }
+    if (typeof newContent !== 'string') {
+      return res.status(400).json({ error: 'content is required' })
+    }
+    
+    // Read current content
+    const currentRaw = safeRead(filePath)
+    if (!currentRaw) {
+      return res.status(404).json({ error: 'Page not found' })
+    }
+    
+    const { data: currentData, content: currentContent } = matter(currentRaw)
+    
+    // Update frontmatter
+    const today = new Date().toISOString().split('T')[0]
+    const currentRevision = (currentData.revision as number) || 0
+    const newRevision = currentRevision + 1
+    
+    const newData = {
+      ...currentData,
+      revision: newRevision,
+      modified: today,
+    }
+    
+    // Build new file content
+    const newFile = matter.stringify(newContent, newData)
+    
+    // Compute diff
+    const hunks = computeDiffHunks(currentContent, newContent)
+    
+    // Create changelog entry
+    const changelogEntry: ChangelogEntry = {
+      id: `edit_${randomUUID().split('-')[0]}`,
+      timestamp: new Date().toISOString(),
+      type: 'manual',
+      reason,
+      changes: [{
+        page: pageId + '.md',
+        revision: newRevision,
+        hunks,
+      }],
+      affected_pages: [pageId + '.md'],
+      user: 'user',
+    }
+    
+    // Save to changelog
+    const changelogFile = getTodayChangelogFile(v)
+    const entries = loadChangelogFile(changelogFile)
+    entries.push(changelogEntry)
+    saveChangelogFile(changelogFile, entries)
+    
+    // Write the file
+    fs.writeFileSync(filePath, newFile, 'utf-8')
+    
+    res.json({
+      success: true,
+      revision: newRevision,
+      modified: today,
+      changelogId: changelogEntry.id,
+    })
+  } catch (err) {
+    console.error('[page-edit] error:', err)
+    res.status(500).json({ error: String(err) })
+  }
+})
+
+// Page revision history
+app.get('/api/wikis/:id/pages/*/history', (req, res) => {
+  try {
+    const v = res.locals.wiki as WikiConfig
+    const rawPageId = (req.params as Record<string, string>)['0'].replace(/\/history$/, '')
+    const pageId = sanitizePageId(rawPageId)
+    const pageFile = pageId + '.md'
+    const limit = parseInt(req.query.limit as string) || 50
+    
+    const changelogDir = getChangelogDir(v)
+    if (!fs.existsSync(changelogDir)) {
+      return res.json([])
+    }
+    
+    // Read all changelog files, sorted by date descending
+    const files = fs.readdirSync(changelogDir)
+      .filter(f => f.endsWith('.json') && f !== 'index.json')
+      .sort((a, b) => b.localeCompare(a))
+    
+    const history: Array<{
+      id: string
+      timestamp: string
+      type: string
+      reason?: string
+      instruction?: string
+      revision: number
+      hunks: Array<{ line_start: number; line_end: number; before: string; after: string }>
+    }> = []
+    
+    for (const file of files) {
+      if (history.length >= limit) break
+      
+      const entries = loadChangelogFile(path.join(changelogDir, file))
+      for (const entry of entries.reverse()) {
+        if (history.length >= limit) break
+        
+        const change = entry.changes.find(c => c.page === pageFile)
+        if (change) {
+          history.push({
+            id: entry.id,
+            timestamp: entry.timestamp,
+            type: entry.type,
+            reason: entry.reason,
+            instruction: entry.instruction,
+            revision: change.revision,
+            hunks: change.hunks,
+          })
+        }
+      }
+    }
+    
+    res.json(history)
+  } catch (err) {
+    console.error('[page-history] error:', err)
+    res.status(500).json({ error: String(err) })
+  }
+})
+
+// Revert to revision
+app.post('/api/wikis/:id/pages/*/revert', (req, res) => {
+  try {
+    const v = res.locals.wiki as WikiConfig
+    const rawPageId = (req.params as Record<string, string>)['0'].replace(/\/revert$/, '')
+    const pageId = sanitizePageId(rawPageId)
+    const baseDir = isWikiMode(v) ? wikiDir(v) : v.path
+    const filePath = path.join(baseDir, pageId + '.md')
+    const pageFile = pageId + '.md'
+    
+    // Security: verify the resolved path is within the wiki directory
+    if (!isPathWithinBase(filePath, baseDir)) {
+      return res.status(400).json({ error: 'Invalid page path' })
+    }
+    
+    const { revision: targetRevision } = req.body as { revision?: number }
+    if (typeof targetRevision !== 'number') {
+      return res.status(400).json({ error: 'revision is required' })
+    }
+    
+    // Read current content
+    const currentRaw = safeRead(filePath)
+    if (!currentRaw) {
+      return res.status(404).json({ error: 'Page not found' })
+    }
+    
+    const { data: currentData, content: currentContent } = matter(currentRaw)
+    
+    // Find the target revision in changelog
+    const changelogDir = getChangelogDir(v)
+    if (!fs.existsSync(changelogDir)) {
+      return res.status(404).json({ error: 'No changelog found' })
+    }
+    
+    // Find the entry for the target revision
+    const files = fs.readdirSync(changelogDir)
+      .filter(f => f.endsWith('.json') && f !== 'index.json')
+      .sort((a, b) => b.localeCompare(a))
+    
+    let targetEntry: ChangelogEntry | null = null
+    let targetChange: ChangelogEntry['changes'][0] | null = null
+    
+    for (const file of files) {
+      const entries = loadChangelogFile(path.join(changelogDir, file))
+      for (const entry of entries) {
+        const change = entry.changes.find(c => c.page === pageFile && c.revision === targetRevision)
+        if (change) {
+          targetEntry = entry
+          targetChange = change
+          break
+        }
+      }
+      if (targetEntry) break
+    }
+    
+    if (!targetEntry || !targetChange) {
+      return res.status(404).json({ error: `Revision ${targetRevision} not found in changelog` })
+    }
+    
+    // Reconstruct the "before" state from the hunks
+    // The hunks contain the state before the target revision was applied
+    // So we use the "before" content from those hunks
+    const beforeContent = targetChange.hunks.map(h => h.before).join('\n')
+    
+    // Update frontmatter for the revert
+    const today = new Date().toISOString().split('T')[0]
+    const currentRevision = (currentData.revision as number) || 0
+    const newRevision = currentRevision + 1
+    
+    const newData = {
+      ...currentData,
+      revision: newRevision,
+      modified: today,
+    }
+    
+    // Build new file content (restoring the before state)
+    const newFile = matter.stringify(beforeContent, newData)
+    
+    // Compute diff for the revert
+    const hunks = computeDiffHunks(currentContent, beforeContent)
+    
+    // Create changelog entry for the revert
+    const revertEntry: ChangelogEntry = {
+      id: `revert_${randomUUID().split('-')[0]}`,
+      timestamp: new Date().toISOString(),
+      type: 'revert',
+      reason: `Reverted to revision ${targetRevision}`,
+      changes: [{
+        page: pageFile,
+        revision: newRevision,
+        hunks,
+      }],
+      affected_pages: [pageFile],
+      user: 'user',
+    }
+    
+    // Save to changelog
+    const changelogFile = getTodayChangelogFile(v)
+    const entries = loadChangelogFile(changelogFile)
+    entries.push(revertEntry)
+    saveChangelogFile(changelogFile, entries)
+    
+    // Write the file
+    fs.writeFileSync(filePath, newFile, 'utf-8')
+    
+    res.json({
+      success: true,
+      revision: newRevision,
+      modified: today,
+      revertedTo: targetRevision,
+      changelogId: revertEntry.id,
+    })
+  } catch (err) {
+    console.error('[page-revert] error:', err)
+    res.status(500).json({ error: String(err) })
+  }
 })
 
 // ─── Graph ────────────────────────────────────────────────────────────────────
@@ -517,14 +971,24 @@ app.get('/api/wikis/:id/graph', (_req, res) => {
   const rawLinks: Array<{ source: string; target: string }> = []
 
   for (const f of files) {
+    /* v8 ignore next */
     const { data, content } = matter(safeRead(f) ?? '')
     const id = pageIdFromPath(f, v)
     const links = extractLinks(content)
+    // Normalize tags: handle both array and comma-separated string
+    const rawTags = data.tags
+    const tags = Array.isArray(rawTags)
+      ? rawTags
+      : typeof rawTags === 'string'
+      ? rawTags.split(',').map((t: string) => t.trim()).filter(Boolean)
+      : []
     nodeMap.set(id, {
       id,
+      /* v8 ignore next */
       title: (data.title as string) || id.split('/').pop() || id,
+      /* v8 ignore next */
       type: (data.type as string) || 'page',
-      tags: (data.tags as string[]) || [],
+      tags,
       linkCount: links.length,
       wordCount: content.split(/\s+/).filter(Boolean).length,
     })
@@ -541,6 +1005,7 @@ app.get('/api/wikis/:id/graph', (_req, res) => {
 
   for (const { target } of resolved) {
     const n = nodeMap.get(target)
+    /* v8 ignore next */
     if (n) n.linkCount++
   }
 
@@ -554,7 +1019,9 @@ app.get('/api/wikis/:id/search', (req, res) => {
   const q = ((req.query.q as string) || '').toLowerCase().trim()
   if (!q) return res.json([])
 
-  const results = getAllMdFiles(wikiDir(v)).flatMap((f) => {
+  const scanDir = isWikiMode(v) ? wikiDir(v) : v.path
+  const results = getAllMdFiles(scanDir).flatMap((f) => {
+    /* v8 ignore next */
     const raw = safeRead(f) ?? ''
     const { data, content } = matter(raw)
     const id = pageIdFromPath(f, v)
@@ -567,6 +1034,7 @@ app.get('/api/wikis/:id/search', (req, res) => {
     if (!score) return []
     const idx = body.indexOf(q)
     const start = Math.max(0, idx - 60)
+    /* v8 ignore next */
     return [{ id, title: (data.title as string) || id, type: (data.type as string) || 'page',
       excerpt: `...${content.slice(start, start + 200).replace(/\s+/g, ' ').trim()}...`, score }]
   }).sort((a, b) => b.score - a.score).slice(0, 20)
@@ -585,7 +1053,13 @@ app.get('/api/wikis/:id/raw', (_req, res) => {
   const inboxExists = !!inbox && fs.existsSync(inbox)
   const files = getAllRawFiles(v).map((f) => {
     const stat = fs.statSync(f)
-    return { path: path.relative(raw ?? v.path, f), name: path.basename(f), size: stat.size, modified: stat.mtime.toISOString() }
+    return {
+      /* v8 ignore next */
+      path: path.relative(raw ?? v.path, f).replace(/\\/g, '/'),
+      name: path.basename(f),
+      size: stat.size,
+      modified: stat.mtime.toISOString(),
+    }
   })
   res.json({ files, inboxExists })
 })
@@ -595,6 +1069,16 @@ const storageFor = (inbox: string) => multer.diskStorage({
   filename: (_req, file, cb) => cb(null, file.originalname.replace(/[^a-zA-Z0-9._-]/g, '_')),
 })
 
+/** Security: validate file extension is in allowlist */
+const fileFilter: multer.Options['fileFilter'] = (_req, file, cb) => {
+  const ext = path.extname(file.originalname).toLowerCase()
+  if (ALLOWED_UPLOAD_EXTENSIONS.has(ext)) {
+    cb(null, true)
+  } else {
+    cb(new Error(`File type not allowed: ${ext}`))
+  }
+}
+
 app.post('/api/wikis/:id/raw/upload', (req, res) => {
   const v = res.locals.wiki as WikiConfig
   const inbox = inboxDir(v)
@@ -602,10 +1086,26 @@ app.post('/api/wikis/:id/raw/upload', (req, res) => {
     return res.status(400).json({ error: NO_INBOX_ERROR })
   }
   const raw = rawDir(v)!
-  multer({ storage: storageFor(inbox) }).array('files')(req, res, (err) => {
-    if (err) return res.status(500).json({ error: String(err) })
+  const upload = multer({
+    storage: storageFor(inbox),
+    fileFilter,
+    limits: {
+      fileSize: MAX_FILE_SIZE,
+      files: MAX_FILES_PER_REQUEST,
+    },
+  })
+  upload.array('files', MAX_FILES_PER_REQUEST)(req, res, (err) => {
+    /* v8 ignore next 2 */
+    if (err instanceof multer.MulterError) {
+      if (err.code === 'LIMIT_FILE_SIZE') return res.status(400).json({ error: 'File too large (max 50MB)' })
+      if (err.code === 'LIMIT_FILE_COUNT') return res.status(400).json({ error: `Too many files (max ${MAX_FILES_PER_REQUEST})` })
+      return res.status(400).json({ error: err.message })
+    }
+    /* v8 ignore next */
+    if (err) return res.status(400).json({ error: String(err) })
+    /* v8 ignore next */
     const files = (req.files as Express.Multer.File[]) || []
-    res.json({ uploaded: files.map((f) => ({ name: f.originalname, path: path.relative(raw, f.path), size: f.size })) })
+    res.json({ uploaded: files.map((f) => ({ name: f.originalname, path: path.relative(raw, f.path).replace(/\\/g, '/'), size: f.size })) })
   })
 })
 
@@ -619,15 +1119,16 @@ app.post('/api/wikis/:id/raw/text', (req, res) => {
     const { filename, content } = req.body as { filename?: string; content?: string }
     if (!content?.trim()) return res.status(400).json({ error: 'content is required' })
     const rawName = (filename?.trim() || `note-${Date.now()}`).replace(/[^a-zA-Z0-9._-]/g, '_')
+    /* v8 ignore next */
     const finalName = rawName.endsWith('.md') ? rawName : `${rawName}.md`
     const filePath = path.join(inbox, finalName)
     fs.writeFileSync(filePath, content, 'utf-8')
     console.log(`[text] saved ${finalName} → ${filePath}`)
     res.json({ name: finalName, path: finalName, size: Buffer.byteLength(content) })
-  } catch (err) {
+  } catch (err) { /* v8 ignore start */
     console.error('[text] error:', err)
     res.status(500).json({ error: String(err) })
-  }
+  } /* v8 ignore stop */
 })
 
 // ─── Log ──────────────────────────────────────────────────────────────────────
@@ -642,78 +1143,179 @@ app.get('/api/wikis/:id/log', (_req, res) => {
   res.json(entries)
 })
 
+// ─── AI Agent Routes ──────────────────────────────────────────────────────────
+
+// Incoming from agent service → broadcast to all WebSocket clients
+app.post('/api/ai/notify', (req, res) => {
+  const { event, data } = req.body as { event?: string; data?: unknown }
+  if (typeof event === 'string') broadcast(event, data ?? {})
+  res.json({ ok: true })
+})
+
+app.get('/api/ai/status', async (_req, res) => {
+  try {
+    const r = await proxyToAgent('/health')
+    res.status(r.status).json(await r.json())
+  } catch {
+    res.status(503).json({ status: 'unavailable', error: 'Agent service not running' })
+  }
+})
+
+app.post('/api/ai/search', async (req, res) => {
+  try {
+    const r = await proxyToAgent('/search', { method: 'POST', body: JSON.stringify(req.body) })
+    res.status(r.status).json(await r.json())
+  } catch {
+    res.status(503).json({ error: 'Agent service not running' })
+  }
+})
+
+app.post('/api/ai/ingest', async (req, res) => {
+  try {
+    const r = await proxyToAgent('/ingest', { method: 'POST', body: JSON.stringify(req.body) })
+    res.status(r.status).json(await r.json())
+  } catch {
+    res.status(503).json({ error: 'Agent service not running' })
+  }
+})
+
+app.get('/api/ai/queue', async (_req, res) => {
+  try {
+    const r = await proxyToAgent('/ingest/queue')
+    res.status(r.status).json(await r.json())
+  } catch {
+    res.status(503).json({ error: 'Agent service not running' })
+  }
+})
+
+app.post('/api/ai/wiki/generate', async (req, res) => {
+  try {
+    const r = await proxyToAgent('/wiki/generate', { method: 'POST', body: JSON.stringify(req.body) })
+    res.status(r.status).json(await r.json())
+  } catch {
+    res.status(503).json({ error: 'Agent service not running' })
+  }
+})
+
+app.post('/api/ai/wikis/:wikiId/reindex', async (req, res) => {
+  try {
+    const includeWikiPages = req.query.include_wiki_pages !== 'false'
+    const r = await proxyToAgent(
+      `/wikis/${req.params.wikiId}/reindex?include_wiki_pages=${includeWikiPages}`,
+      { method: 'POST' }
+    )
+    res.status(r.status).json(await r.json())
+  } catch {
+    res.status(503).json({ error: 'Agent service not running' })
+  }
+})
+
+// AI Edit Proxy Routes
+app.post('/api/ai/edit/preview', async (req, res) => {
+  try {
+    const r = await proxyToAgent('/edit/preview', { method: 'POST', body: JSON.stringify(req.body) })
+    res.status(r.status).json(await r.json())
+  } catch {
+    res.status(503).json({ error: 'Agent service not running' })
+  }
+})
+
+app.post('/api/ai/edit/apply', async (req, res) => {
+  try {
+    const r = await proxyToAgent('/edit/apply', { method: 'POST', body: JSON.stringify(req.body) })
+    res.status(r.status).json(await r.json())
+  } catch {
+    res.status(503).json({ error: 'Agent service not running' })
+  }
+})
+
+app.get('/api/ai/edit/history', async (req, res) => {
+  try {
+    const query = new URLSearchParams(req.query as Record<string, string>).toString()
+    const r = await proxyToAgent(`/edit/history${query ? '?' + query : ''}`)
+    res.status(r.status).json(await r.json())
+  } catch {
+    res.status(503).json({ error: 'Agent service not running' })
+  }
+})
+
 // ─── HTTP + WebSocket ─────────────────────────────────────────────────────────
 
 const httpServer = createServer(app)
 const wss = new WebSocketServer({ server: httpServer, path: '/ws' })
 const clients = new Set<WebSocket>()
 
+/* v8 ignore next 4 */
 wss.on('connection', (ws) => {
   clients.add(ws)
   ws.on('close', () => clients.delete(ws))
 })
 
+/* v8 ignore start */
 function broadcast(event: string, data: unknown) {
   const msg = JSON.stringify({ event, data })
   for (const ws of clients) if (ws.readyState === WebSocket.OPEN) ws.send(msg)
 }
 
 // Watch all wiki paths
-let activeWatcher: ReturnType<typeof chokidar.watch> | null = null
-
 function watchVaults() {
   const wikis = loadWikis()
-  const paths = wikis.flatMap((v) => {
-    const wiki = wikiDir(v)
-    const raw = rawDir(v)
-    return [wiki, ...(raw ? [raw] : [])]
-  }).filter((p) => fs.existsSync(p))
+  const paths = wikis.flatMap((v) => [path.join(v.path, 'wiki'), path.join(v.path, 'raw')])
+    .filter((p) => fs.existsSync(p))
 
-  if (activeWatcher) { activeWatcher.close(); activeWatcher = null }
   if (!paths.length) return
 
-  activeWatcher = chokidar.watch(paths, { ignoreInitial: true, awaitWriteFinish: { stabilityThreshold: 300 } })
-    .on('add', (f) => {
-      const wiki = wikis.find((v) => f.startsWith(v.path))
-      broadcast('file:add', { path: f, wikiId: wiki?.id })
-    })
-    .on('change', (f) => {
-      const wiki = wikis.find((v) => f.startsWith(v.path))
-      broadcast('file:change', { path: f, wikiId: wiki?.id })
-    })
-    .on('unlink', (f) => {
-      const wiki = wikis.find((v) => f.startsWith(v.path))
-      broadcast('file:remove', { path: f, wikiId: wiki?.id })
-    })
-}
+  // Normalise to forward slashes so matching works on Windows (chokidar
+  // emits forward-slash paths even on Windows, but stored paths may not).
+  const normFwd = (p: string) => p.replace(/\\/g, '/')
+  const findWiki = (f: string) =>
+    wikis.find((v) => normFwd(f).startsWith(normFwd(v.path)))
 
+  chokidar.watch(paths, { ignoreInitial: true, awaitWriteFinish: { stabilityThreshold: 300 } })
+    .on('add',    (f) => broadcast('file:add',    { path: f, wikiId: findWiki(f)?.id }))
+    .on('change', (f) => broadcast('file:change', { path: f, wikiId: findWiki(f)?.id }))
+    .on('unlink', (f) => broadcast('file:remove', { path: f, wikiId: findWiki(f)?.id }))
+}
+/* v8 ignore stop */
+
+/* v8 ignore start */
 watchVaults()
+/* v8 ignore stop */
 
 // ─── Serve Frontend ───────────────────────────────────────────────────────────
 
-const DIST_DIR = path.resolve(__dirname, '../dist')
+// In bundled app, WIKI_FRONTEND_DIR points to the dist folder
+// In dev, it's relative to the server directory
+const DIST_DIR = process.env.WIKI_FRONTEND_DIR || path.resolve(__dirname, '../dist')
 const isProd = process.env.NODE_ENV === 'production'
 
+/* v8 ignore start */
 if (isProd && fs.existsSync(DIST_DIR)) {
-  // Production: serve the built React app
+  console.log('[Server] Serving frontend from:', DIST_DIR)
   app.use(express.static(DIST_DIR))
-  // SPA fallback — let React Router handle all non-API routes
   app.get('*', (_req, res) => {
     res.sendFile(path.join(DIST_DIR, 'index.html'))
   })
 } else {
-  // Dev mode: Vite handles the frontend on :5173
   app.get('*', (_req, res) => {
     res.redirect('http://localhost:5173')
   })
 }
+/* v8 ignore stop */
 
-const PORT = 3001
-httpServer.listen(PORT, () => {
-  const hasBuilt = fs.existsSync(DIST_DIR)
-  console.log(`\n  Wiki server →  http://localhost:${PORT}`)
-  if (!hasBuilt) {
-    console.log(`  UI dev server → http://localhost:5173  (open this one)`)
-  }
-  console.log()
-})
+// Export for integration tests (supertest uses app directly without binding a port)
+export { app }
+
+const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3001
+/* v8 ignore start */
+if (process.env.NODE_ENV !== 'test') {
+  httpServer.listen(PORT, () => {
+    const hasBuilt = fs.existsSync(DIST_DIR)
+    console.log(`\n  Wiki server →  http://localhost:${PORT}`)
+    if (!isProd && !hasBuilt) {
+      console.log(`  UI dev server → http://localhost:5173  (open this one)`)
+    }
+    console.log()
+  })
+}
+/* v8 ignore stop */

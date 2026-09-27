@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect, useRef } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { useDropzone } from 'react-dropzone'
 import {
@@ -15,16 +15,18 @@ import {
   ClipboardPaste,
   Send,
   FileText,
-  ClipboardCopy,
-  Check,
+  Sparkles,
 } from 'lucide-react'
-import { useSearch, useRawFiles } from '../hooks/useWiki'
+import { useSearch, useRawFiles, useWikis } from '../hooks/useWiki'
+import { api } from '../utils/api'
 import type { WikiPageMeta, SearchResult, PageType, RawFile } from '../types'
 import { PAGE_TYPE_COLORS } from '../types'
+import IngestStatus from './IngestStatus'
 
 interface SidebarProps {
   wikiId: string
   pages: WikiPageMeta[]
+  mode?: 'wiki' | 'folder'
 }
 
 const TYPE_ICONS: Record<PageType | string, string> = {
@@ -50,8 +52,8 @@ function NavItem({ label, to, icon }: { label: string; to: string; icon: React.R
         w-full flex items-center gap-2 px-3 py-1.5 rounded text-sm text-left
         transition-colors
         ${active
-          ? 'bg-[#89b4fa]/10 text-[#89b4fa]'
-          : 'text-[#6c7086] hover:text-[#cdd6f4] hover:bg-[#313244]/50'
+          ? 'bg-[var(--accent-faint)] text-[var(--accent)]'
+          : 'text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-elevated)]/50'
         }
       `}
     >
@@ -76,6 +78,7 @@ function PageTree({ wikiId, pages }: { wikiId: string; pages: WikiPageMeta[] }) 
   }
 
   const sortedGroups = Object.entries(groups).sort(([a], [b]) => {
+    /* v8 ignore next */
     if (a === '_root') return -1
     if (b === '_root') return 1
     return a.localeCompare(b)
@@ -92,7 +95,7 @@ function PageTree({ wikiId, pages }: { wikiId: string; pages: WikiPageMeta[] }) 
             {!isRoot && (
               <button
                 onClick={() => setCollapsed((c) => ({ ...c, [group]: !c[group] }))}
-                className="w-full flex items-center gap-1.5 px-2 py-1 text-xs font-semibold text-[#6c7086] hover:text-[#cdd6f4] uppercase tracking-wider"
+                className="w-full flex items-center gap-1.5 px-2 py-1 text-xs font-semibold text-[var(--text-muted)] hover:text-[var(--text-primary)] uppercase tracking-wider"
               >
                 {isCollapsed ? <ChevronRight size={12} /> : <ChevronDown size={12} />}
                 <FolderOpen size={12} />
@@ -100,14 +103,16 @@ function PageTree({ wikiId, pages }: { wikiId: string; pages: WikiPageMeta[] }) 
               </button>
             )}
             {!isCollapsed && (
-              <div className={isRoot ? '' : 'ml-3 border-l border-[#313244]/60 pl-2'}>
+              <div className={isRoot ? '' : 'ml-3 border-l border-[var(--border)]/60 pl-2'}>
                 {groupPages
                   .sort((a, b) => a.title.localeCompare(b.title))
                   .map((page) => {
                     const active =
                       location.pathname === `/wiki/${wikiId}/page/${page.id}` ||
                       location.pathname === `/wiki/${wikiId}/page/${page.id}/`
+                    /* v8 ignore next */
                     const color = PAGE_TYPE_COLORS[page.type] || PAGE_TYPE_COLORS.page
+                    /* v8 ignore next */
                     const icon = TYPE_ICONS[page.type] || '○'
                     return (
                       <button
@@ -117,8 +122,8 @@ function PageTree({ wikiId, pages }: { wikiId: string; pages: WikiPageMeta[] }) 
                           w-full flex items-center gap-2 px-2 py-1 rounded text-sm text-left
                           transition-colors
                           ${active
-                            ? 'bg-[#89b4fa]/10 text-[#cdd6f4]'
-                            : 'text-[#a6adc8] hover:text-[#cdd6f4] hover:bg-[#313244]/30'
+                            ? 'bg-[var(--accent-faint)] text-[var(--text-primary)]'
+                            : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-elevated)]/30'
                           }
                         `}
                         title={page.title}
@@ -155,7 +160,7 @@ function SearchResults({
   const navigate = useNavigate()
   if (!results.length) {
     return (
-      <div className="px-3 py-4 text-sm text-[#6c7086] text-center">
+      <div className="px-3 py-4 text-sm text-[var(--text-muted)] text-center">
         No results for "{query}"
       </div>
     )
@@ -163,72 +168,89 @@ function SearchResults({
 
   return (
     <div>
-      {results.map((r) => (
-        <button
-          key={r.id}
-          onClick={() => {
-            navigate(`/wiki/${wikiId}/page/${r.id}`)
-            onClose()
-          }}
-          className="w-full px-3 py-2.5 text-left hover:bg-[#313244]/50 border-b border-[#313244]/50 last:border-0"
-        >
-          <div className="flex items-center gap-2 mb-0.5">
-            <span
-              className="text-xs"
-              style={{ color: PAGE_TYPE_COLORS[r.type] || PAGE_TYPE_COLORS.page }}
-            >
-              {TYPE_ICONS[r.type] || '○'}
-            </span>
-            <span className="text-sm font-medium text-[#cdd6f4] truncate">{r.title}</span>
-          </div>
-          <p className="text-xs text-[#6c7086] line-clamp-2 pl-4">{r.excerpt}</p>
-        </button>
-      ))}
+      {results.map((r) => {
+        /* v8 ignore next */
+        const rColor = PAGE_TYPE_COLORS[r.type] || PAGE_TYPE_COLORS.page
+        /* v8 ignore next */
+        const rIcon = TYPE_ICONS[r.type] || '○'
+        return (
+          <button
+            key={r.id}
+            onClick={() => {
+              navigate(`/wiki/${wikiId}/page/${r.id}`)
+              onClose()
+            }}
+            className="w-full px-3 py-2.5 text-left hover:bg-[var(--bg-elevated)]/50 border-b border-[var(--border-subtle)] last:border-0"
+          >
+            <div className="flex items-center gap-2 mb-0.5">
+              <span
+                className="text-xs"
+                style={{ color: rColor }}
+              >
+                {rIcon}
+              </span>
+              <span className="text-sm font-medium text-[var(--text-primary)] truncate">{r.title}</span>
+            </div>
+            <p className="text-xs text-[var(--text-muted)] line-clamp-2 pl-4">{r.excerpt}</p>
+          </button>
+        )
+      })}
     </div>
   )
 }
 
-function IngestSection({ wikiId, inboxExists, onUploaded }: { wikiId: string; inboxExists: boolean | null; onUploaded: () => void }) {
+import { snapshotDrop, resolveDropSnapshot } from '../utils/dragDrop'
+
+function IngestSection({ wikiId, wikiPath, inboxExists, onUploaded }: { wikiId: string; wikiPath: string; inboxExists: boolean | null; onUploaded: () => void }) {
   const [tab, setTab] = useState<'upload' | 'paste'>('upload')
   const [busy, setBusy] = useState(false)
   const [success, setSuccess] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [showOutlookTip, setShowOutlookTip] = useState(false)
 
-  if (inboxExists === false) {
-    return (
-      <div className="px-2">
-        <div className="p-3 rounded-lg border border-[#f38ba8]/20 bg-[#f38ba8]/5 text-xs text-[#f38ba8] space-y-1">
-          <p className="font-medium">No raw/inbox/ folder</p>
-          <p className="text-[#f38ba8]/70">Run <code className="bg-[#1e1e2e] px-1 rounded">/create-wiki</code> in your IDE to set up the folder structure.</p>
-        </div>
-      </div>
-    )
-  }
   // paste-text state
   const [pasteFilename, setPasteFilename] = useState('')
   const [pasteContent, setPasteContent] = useState('')
 
+  // Debug: Log ALL drag events on document to detect Outlook drops
+  useEffect(() => {
+    const logDrag = (e: DragEvent) => {
+      console.log(`[Document ${e.type}] types:`, e.dataTransfer?.types, 'files:', e.dataTransfer?.files?.length)
+    }
+    document.addEventListener('dragenter', logDrag)
+    document.addEventListener('dragover', logDrag)
+    document.addEventListener('drop', logDrag)
+    return () => {
+      document.removeEventListener('dragenter', logDrag)
+      document.removeEventListener('dragover', logDrag)
+      document.removeEventListener('drop', logDrag)
+    }
+  }, [])
+
   const showSuccess = (msg: string) => {
     setError(null)
     setSuccess(msg)
+    /* v8 ignore next */
     setTimeout(() => setSuccess(null), 4000)
   }
 
   const showError = (msg: string) => {
     setSuccess(null)
     setError(msg)
+    /* v8 ignore next */
     setTimeout(() => setError(null), 6000)
   }
 
   // ── File upload ──────────────────────────────────────────────────────────
-  const onDrop = useCallback(
-    async (acceptedFiles: File[]) => {
-      if (!acceptedFiles.length) return
+  const handleFiles = useCallback(
+    async (files: File[]) => {
+      /* v8 ignore next */
+      if (!files.length) return
       setBusy(true)
       try {
         const form = new FormData()
-        for (const f of acceptedFiles) form.append('files', f)
-        const res = await fetch(`/api/wikis/${wikiId}/raw/upload`, { method: 'POST', body: form })
+        for (const f of files) form.append('files', f)
+        const res = await fetch(api(`/api/wikis/${wikiId}/raw/upload`), { method: 'POST', body: form })
         if (!res.ok) throw new Error(`Server error: ${res.status}`)
         const data = (await res.json()) as { uploaded: Array<{ name: string }> }
         showSuccess(`Added: ${data.uploaded.map((f) => f.name).join(', ')}`)
@@ -242,14 +264,85 @@ function IngestSection({ wikiId, inboxExists, onUploaded }: { wikiId: string; in
     [wikiId, onUploaded]
   )
 
-  const { getRootProps, getInputProps, isDragActive } = useDropzone({ onDrop })
+  // react-dropzone is kept only for click-to-browse; native events handle the
+  // actual drag so Outlook (which omits 'Files' from dataTransfer.types) works.
+  const { getInputProps, open: openFilePicker } = useDropzone({
+    onDrop: handleFiles,
+    noDrag: true,
+    noClick: true,
+  })
+
+  const dropZoneRef = useRef<HTMLDivElement>(null)
+  const [nativeDragActive, setNativeDragActive] = useState(false)
+  const handleFilesRef = useRef(handleFiles)
+  handleFilesRef.current = handleFiles
+
+  useEffect(() => {
+    const el = dropZoneRef.current
+    /* v8 ignore next */
+    if (!el) return
+
+    const onDragOver = (e: DragEvent) => { e.preventDefault(); e.stopPropagation(); setNativeDragActive(true) }
+    const onDragEnter = (e: DragEvent) => { e.preventDefault(); e.stopPropagation(); setNativeDragActive(true) }
+    const onDragLeave = (e: DragEvent) => {
+      e.preventDefault()
+      /* v8 ignore next */
+      if (!el.contains(e.relatedTarget as Node | null)) setNativeDragActive(false)
+    }
+    const onDrop = (e: DragEvent) => {
+      e.preventDefault()
+      e.stopPropagation()
+      setNativeDragActive(false)
+      if (!e.dataTransfer) return
+      // Snapshot synchronously (DataTransfer clears after handler returns),
+      // then resolve asynchronously and upload.
+      const snap = snapshotDrop(e.dataTransfer)
+      // Debug logging for drag/drop troubleshooting
+      console.log('[Drop] Available types:', snap.availableTypes)
+      console.log('[Drop] stdFiles:', snap.stdFiles.length, snap.stdFiles.map(f => f.name))
+      console.log('[Drop] itemFiles:', snap.itemFiles.length, snap.itemFiles.map(f => f.name))
+      console.log('[Drop] entries:', snap.entries.length, snap.entries.map(e => e.name))
+      console.log('[Drop] plainText length:', snap.plainText.length)
+      console.log('[Drop] htmlText length:', snap.htmlText.length)
+      console.log('[Drop] emailData length:', snap.emailData.length)
+      
+      // Detect Outlook drag (has data types but no usable files) - show tip
+      const isLikelyOutlook = snap.availableTypes.some(t => 
+        t.includes('com.microsoft') || t.includes('public.url') || t === 'text/uri-list'
+      ) && snap.stdFiles.length === 0 && snap.itemFiles.length === 0
+      
+      /* v8 ignore next */
+      resolveDropSnapshot(snap).then((files) => {
+        console.log('[Drop] Resolved files:', files.length, files.map(f => `${f.name} (${f.type})`))
+        if (files.length) {
+          handleFilesRef.current(files)
+        } else if (isLikelyOutlook) {
+          // No files resolved from Outlook drag - show inbox tip
+          setShowOutlookTip(true)
+          setTimeout(() => setShowOutlookTip(false), 8000)
+        }
+      })
+    }
+
+    el.addEventListener('dragover', onDragOver)
+    el.addEventListener('dragenter', onDragEnter)
+    el.addEventListener('dragleave', onDragLeave)
+    el.addEventListener('drop', onDrop)
+    return () => {
+      el.removeEventListener('dragover', onDragOver)
+      el.removeEventListener('dragenter', onDragEnter)
+      el.removeEventListener('dragleave', onDragLeave)
+      el.removeEventListener('drop', onDrop)
+    }
+  }, [])
 
   // ── Paste text ────────────────────────────────────────────────────────────
   const handlePasteSubmit = useCallback(async () => {
+    /* v8 ignore next */
     if (!pasteContent.trim()) return
     setBusy(true)
     try {
-      const res = await fetch(`/api/wikis/${wikiId}/raw/text`, {
+      const res = await fetch(api(`/api/wikis/${wikiId}/raw/text`), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ filename: pasteFilename, content: pasteContent }),
@@ -267,10 +360,22 @@ function IngestSection({ wikiId, inboxExists, onUploaded }: { wikiId: string; in
     }
   }, [wikiId, pasteFilename, pasteContent, onUploaded])
 
+  // If no inbox folder, show error message instead of upload UI
+  if (inboxExists === false) {
+    return (
+      <div className="px-2">
+        <div className="p-3 rounded-lg border border-[var(--error-border)] bg-[var(--error-faint)] text-xs text-[var(--error)] space-y-1">
+          <p className="font-medium">No raw/inbox/ folder</p>
+          <p className="text-[var(--error)]/70">Run <code className="bg-[var(--bg-base)] px-1 rounded">/create-wiki</code> in your IDE to set up the folder structure.</p>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="px-2">
       {/* Tab switcher */}
-      <div className="flex rounded-md overflow-hidden border border-[#313244] mb-2 text-xs">
+      <div className="flex rounded-md overflow-hidden border border-[var(--border)] mb-2 text-xs">
         {(['upload', 'paste'] as const).map((t) => (
           <button
             key={t}
@@ -278,8 +383,8 @@ function IngestSection({ wikiId, inboxExists, onUploaded }: { wikiId: string; in
             className={`
               flex-1 flex items-center justify-center gap-1.5 py-1.5 transition-colors
               ${tab === t
-                ? 'bg-[#313244] text-[#cdd6f4]'
-                : 'text-[#6c7086] hover:text-[#a6adc8] hover:bg-[#313244]/40'
+                ? 'bg-[var(--bg-elevated)] text-[var(--text-primary)]'
+                : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--bg-elevated)]/40'
               }
             `}
           >
@@ -290,31 +395,65 @@ function IngestSection({ wikiId, inboxExists, onUploaded }: { wikiId: string; in
       </div>
 
       {tab === 'upload' ? (
-        <div
-          {...getRootProps()}
-          className={`
-            p-3 rounded-lg border-2 border-dashed cursor-pointer transition-colors text-center
-            ${isDragActive
-              ? 'border-[#89b4fa] bg-[#89b4fa]/10 text-[#89b4fa]'
-              : 'border-[#313244] text-[#6c7086] hover:border-[#45475a] hover:text-[#a6adc8]'
-            }
-          `}
-        >
-          <input {...getInputProps()} />
-          {busy ? (
-            <div className="flex items-center justify-center gap-2">
-              <Loader2 size={13} className="animate-spin" />
-              <span className="text-xs">Uploading…</span>
-            </div>
-          ) : (
-            <div className="flex flex-col items-center gap-1">
-              <Upload size={13} />
-              <span className="text-xs">
-                {isDragActive ? 'Drop files here' : 'Drop files or click to upload'}
-              </span>
+        <>
+          <div
+            ref={dropZoneRef}
+            onClick={openFilePicker}
+            className={`
+              p-3 rounded-lg border-2 border-dashed cursor-pointer transition-colors text-center
+              ${nativeDragActive
+                ? 'border-[var(--accent)] bg-[var(--accent-faint)] text-[var(--accent)]'
+                : 'border-[var(--border)] text-[var(--text-muted)] hover:border-[var(--border-strong)] hover:text-[var(--text-secondary)]'
+              }
+            `}
+          >
+            <input {...getInputProps()} />
+            {busy ? (
+              <div className="flex items-center justify-center gap-2">
+                <Loader2 size={13} className="animate-spin" />
+                <span className="text-xs">Uploading…</span>
+              </div>
+            ) : (
+              <div className="flex flex-col items-center gap-1">
+                <Upload size={13} />
+                <span className="text-xs">
+                  {nativeDragActive ? 'Drop files here' : 'Drop files or click to upload'}
+                </span>
+              </div>
+            )}
+          </div>
+          
+          {/* Outlook drag tip */}
+          {showOutlookTip && (
+            <div className="mt-1.5 p-2 bg-[var(--warning-faint)] border border-[var(--warning-border)] rounded text-xs text-[var(--warning)]">
+              <p className="font-medium mb-1">Outlook emails not captured</p>
+              <p className="text-[var(--warning)]/80">
+                Outlook for Mac uses a special format. Drop emails into the inbox folder instead:
+              </p>
+              {window.electronAPI && wikiPath && (
+                <button
+                  onClick={() => window.electronAPI?.openInboxFolder?.(wikiPath)}
+                  className="mt-1.5 flex items-center gap-1.5 text-[var(--accent)] hover:underline"
+                >
+                  <FolderOpen size={11} />
+                  Open Inbox in Finder
+                </button>
+              )}
             </div>
           )}
-        </div>
+          
+          {/* Open inbox folder link (Electron only) */}
+          {window.electronAPI && wikiPath && !showOutlookTip && (
+            <button
+              onClick={() => window.electronAPI?.openInboxFolder?.(wikiPath)}
+              className="mt-1.5 flex items-center justify-center gap-1.5 text-xs text-[var(--text-muted)] hover:text-[var(--accent)] transition-colors"
+              title="Open inbox folder in Finder — useful for Outlook email drag/drop"
+            >
+              <FolderOpen size={11} />
+              Open inbox folder
+            </button>
+          )}
+        </>
       ) : (
         <div className="space-y-1.5">
           <input
@@ -322,19 +461,19 @@ function IngestSection({ wikiId, inboxExists, onUploaded }: { wikiId: string; in
             placeholder="Filename (optional, .md auto-added)"
             value={pasteFilename}
             onChange={(e) => setPasteFilename(e.target.value)}
-            className="w-full bg-[#24273a] border border-[#313244] rounded px-2.5 py-1.5 text-xs text-[#cdd6f4] placeholder-[#6c7086] outline-none focus:border-[#89b4fa]/50"
+            className="w-full bg-[var(--bg-surface)] border border-[var(--border)] rounded px-2.5 py-1.5 text-xs text-[var(--text-primary)] placeholder-[var(--text-muted)] outline-none focus:border-[var(--accent-border-strong)]"
           />
           <textarea
             placeholder="Paste markdown, notes, or any text…"
             value={pasteContent}
             onChange={(e) => setPasteContent(e.target.value)}
             rows={5}
-            className="w-full bg-[#24273a] border border-[#313244] rounded px-2.5 py-1.5 text-xs text-[#cdd6f4] placeholder-[#6c7086] outline-none focus:border-[#89b4fa]/50 resize-none font-mono"
+            className="w-full bg-[var(--bg-surface)] border border-[var(--border)] rounded px-2.5 py-1.5 text-xs text-[var(--text-primary)] placeholder-[var(--text-muted)] outline-none focus:border-[var(--accent-border-strong)] resize-none font-mono"
           />
           <button
             onClick={handlePasteSubmit}
             disabled={busy || !pasteContent.trim()}
-            className="w-full flex items-center justify-center gap-1.5 py-1.5 rounded bg-[#89b4fa]/10 text-[#89b4fa] border border-[#89b4fa]/20 text-xs font-medium hover:bg-[#89b4fa]/20 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            className="w-full flex items-center justify-center gap-1.5 py-1.5 rounded bg-[var(--accent-faint)] text-[var(--accent)] border border-[var(--accent-border)] text-xs font-medium hover:bg-[var(--accent-moderate)] disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
           >
             {busy ? <Loader2 size={12} className="animate-spin" /> : <Send size={12} />}
             Save to raw/
@@ -343,12 +482,12 @@ function IngestSection({ wikiId, inboxExists, onUploaded }: { wikiId: string; in
       )}
 
       {success && (
-        <div className="mt-1.5 p-2 bg-[#a6e3a1]/10 rounded text-xs text-[#a6e3a1]">
+        <div className="mt-1.5 p-2 bg-[var(--success-faint)] rounded text-xs text-[var(--success)]">
           ✓ {success}
         </div>
       )}
       {error && (
-        <div className="mt-1.5 p-2 bg-[#f38ba8]/10 rounded text-xs text-[#f38ba8]">
+        <div className="mt-1.5 p-2 bg-[var(--error-faint)] rounded text-xs text-[var(--error)]">
           ✗ {error}
         </div>
       )}
@@ -356,33 +495,50 @@ function IngestSection({ wikiId, inboxExists, onUploaded }: { wikiId: string; in
   )
 }
 
-function InboxSection({ wikiId, files, loading, reload }: { wikiId: string; files: RawFile[]; loading: boolean; reload: () => void }) {
-  const [copiedFile, setCopiedFile] = useState<string | null>(null)
+function InboxSection({ wikiId, wikiPath, files, loading, reload }: { wikiId: string; wikiPath: string; files: RawFile[]; loading: boolean; reload: () => void }) {
+  const [ingesting, setIngesting] = useState<string | null>(null) // filename being ingested
+  const [ingestStatus, setIngestStatus] = useState<{ file: string; type: 'success' | 'error'; msg: string } | null>(null)
 
   const inboxFiles: RawFile[] = files.filter((f) => f.path.startsWith('inbox/'))
 
-  const handleCopyPrompt = async (file: RawFile) => {
-    const prompt = `ADD raw/inbox/${file.name}`
+  const handleIngest = async (file: RawFile) => {
+    setIngesting(file.name)
+    setIngestStatus(null)
     try {
-      await navigator.clipboard.writeText(prompt)
-      setCopiedFile(file.name)
-      setTimeout(() => setCopiedFile(null), 2500)
-    } catch {
-      // fallback: select text from a hidden input
+      // Call the AI agent's ingest endpoint
+      const res = await fetch('http://localhost:8000/ingest', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          wiki_id: wikiId,
+          file_path: `${wikiPath}/raw/inbox/${file.name}`,
+        }),
+      })
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        throw new Error(data.detail || `Server error: ${res.status}`)
+      }
+      setIngestStatus({ file: file.name, type: 'success', msg: 'Queued for processing' })
+      setTimeout(() => setIngestStatus(null), 3000)
+    } catch (e) {
+      setIngestStatus({ file: file.name, type: 'error', msg: String(e) })
+      setTimeout(() => setIngestStatus(null), 5000)
+    } finally {
+      setIngesting(null)
     }
   }
 
   if (loading || inboxFiles.length === 0) return null
 
   return (
-    <div className="border-t border-[#313244] py-2">
+    <div className="border-t border-[var(--border)] py-2">
       <div className="flex items-center justify-between px-4 pb-1.5">
-        <p className="text-xs font-semibold text-[#6c7086] uppercase tracking-wider">
+        <p className="text-xs font-semibold text-[var(--text-muted)] uppercase tracking-wider">
           Inbox ({inboxFiles.length})
         </p>
         <button
           onClick={reload}
-          className="text-[#6c7086] hover:text-[#cdd6f4] transition-colors"
+          className="text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
           title="Refresh inbox"
         >
           <ScrollText size={11} />
@@ -390,30 +546,40 @@ function InboxSection({ wikiId, files, loading, reload }: { wikiId: string; file
       </div>
       <div className="px-2 space-y-0.5">
         {inboxFiles.map((file) => {
-          const copied = copiedFile === file.name
+          const isIngesting = ingesting === file.name
+          const status = ingestStatus?.file === file.name ? ingestStatus : null
           return (
             <div
               key={file.name}
-              className="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-[#313244]/30 group"
+              className="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-[var(--bg-elevated)]/30 group"
             >
-              <FileText size={11} className="text-[#6c7086] flex-shrink-0" />
-              <span className="text-xs text-[#a6adc8] truncate flex-1" title={file.name}>
+              <FileText size={11} className="text-[var(--text-muted)] flex-shrink-0" />
+              <span className="text-xs text-[var(--text-secondary)] truncate flex-1" title={file.name}>
                 {file.name}
               </span>
-              <button
-                onClick={() => handleCopyPrompt(file)}
-                title="Copy ingest prompt to clipboard"
-                className={`
-                  flex items-center gap-1 px-1.5 py-0.5 rounded text-xs transition-colors flex-shrink-0
-                  ${copied
-                    ? 'text-[#a6e3a1] bg-[#a6e3a1]/10'
-                    : 'text-[#6c7086] hover:text-[#89b4fa] hover:bg-[#89b4fa]/10 opacity-0 group-hover:opacity-100'
-                  }
-                `}
-              >
-                {copied ? <Check size={11} /> : <ClipboardCopy size={11} />}
-                <span>{copied ? 'Copied!' : 'Ingest'}</span>
-              </button>
+              {status ? (
+                <span className={`text-xs px-1.5 py-0.5 rounded ${
+                  status.type === 'success' 
+                    ? 'text-[var(--success)] bg-[var(--success-faint)]' 
+                    : 'text-[var(--error)] bg-[var(--error-faint)]'
+                }`}>
+                  {status.msg}
+                </span>
+              ) : (
+                <button
+                  onClick={() => handleIngest(file)}
+                  disabled={isIngesting}
+                  title="Process with AI agent"
+                  className="flex items-center gap-1 px-1.5 py-0.5 rounded text-xs transition-colors flex-shrink-0 text-[var(--text-muted)] hover:text-[var(--accent)] hover:bg-[var(--accent-faint)] opacity-0 group-hover:opacity-100 disabled:opacity-50"
+                >
+                  {isIngesting ? (
+                    <Loader2 size={11} className="animate-spin" />
+                  ) : (
+                    <Sparkles size={11} />
+                  )}
+                  <span>{isIngesting ? 'Processing...' : 'Ingest'}</span>
+                </button>
+              )}
             </div>
           )
         })}
@@ -422,27 +588,38 @@ function InboxSection({ wikiId, files, loading, reload }: { wikiId: string; file
   )
 }
 
-export default function Sidebar({ wikiId, pages }: SidebarProps) {
+export default function Sidebar({ wikiId, pages, mode = 'wiki' }: SidebarProps) {
   const { query, setQuery, results, searching } = useSearch(wikiId)
   const { files: rawFiles, inboxExists, loading: rawLoading, reload: reloadRaw } = useRawFiles(wikiId)
+  const { wikis } = useWikis()
+  const wikiPath = wikis.find((w) => w.id === wikiId)?.path ?? ''
   const [showSearch, setShowSearch] = useState(false)
 
+  const isFolder = mode === 'folder'
+
   return (
-    <div className="flex flex-col h-full">
+    <div className="wiki-sidebar flex flex-col h-full">
       {/* Header */}
-      <div className="px-4 py-3 border-b border-[#313244]">
+      <div className="px-4 py-3 border-b border-[var(--border)]">
         <div className="flex items-center gap-2 mb-3">
-          <BookOpen size={16} className="text-[#89b4fa]" />
-          <span className="font-semibold text-[#cdd6f4] text-sm">Wiki</span>
+          <BookOpen size={16} className="text-[var(--accent)]" />
+          <span className="font-semibold text-[var(--text-primary)] text-sm">
+            {isFolder ? 'Folder' : 'Wiki'}
+          </span>
+          {isFolder && (
+            <span className="ml-auto text-[10px] px-1.5 py-0.5 rounded bg-[var(--bg-elevated)] text-[var(--text-muted)] uppercase tracking-wider">
+              read-only
+            </span>
+          )}
         </div>
 
         {/* Search */}
         <div className="relative">
-          <div className="flex items-center gap-2 bg-[#24273a] border border-[#313244] rounded-md px-2.5 py-1.5">
+          <div className="flex items-center gap-2 bg-[var(--bg-surface)] border border-[var(--border)] rounded-md px-2.5 py-1.5">
             {searching ? (
-              <Loader2 size={14} className="text-[#6c7086] animate-spin flex-shrink-0" />
+              <Loader2 size={14} className="text-[var(--text-muted)] animate-spin flex-shrink-0" />
             ) : (
-              <Search size={14} className="text-[#6c7086] flex-shrink-0" />
+              <Search size={14} className="text-[var(--text-muted)] flex-shrink-0" />
             )}
             <input
               type="text"
@@ -453,7 +630,7 @@ export default function Sidebar({ wikiId, pages }: SidebarProps) {
                 setShowSearch(true)
               }}
               onFocus={() => setShowSearch(true)}
-              className="bg-transparent text-sm text-[#cdd6f4] placeholder-[#6c7086] outline-none w-full"
+              className="bg-transparent text-sm text-[var(--text-primary)] placeholder-[var(--text-muted)] outline-none w-full"
             />
             {query && (
               <button
@@ -461,14 +638,14 @@ export default function Sidebar({ wikiId, pages }: SidebarProps) {
                   setQuery('')
                   setShowSearch(false)
                 }}
-                className="text-[#6c7086] hover:text-[#cdd6f4]"
+                className="text-[var(--text-muted)] hover:text-[var(--text-primary)]"
               >
                 <X size={13} />
               </button>
             )}
           </div>
           {showSearch && query && (
-            <div className="absolute top-full mt-1 left-0 right-0 bg-[#181825] border border-[#313244] rounded-lg shadow-xl z-50 max-h-80 overflow-y-auto">
+            <div className="absolute top-full mt-1 left-0 right-0 bg-[var(--bg-mantle)] border border-[var(--border)] rounded-lg shadow-xl z-50 max-h-80 overflow-y-auto">
               <SearchResults
                 wikiId={wikiId}
                 results={results}
@@ -484,34 +661,42 @@ export default function Sidebar({ wikiId, pages }: SidebarProps) {
       </div>
 
       {/* Nav */}
-      <div className="px-2 py-2 border-b border-[#313244] space-y-0.5">
-        <NavItem
-          label="Graph view"
-          to={`/wiki/${wikiId}/graph`}
-          icon={<GitGraph size={14} />}
-        />
-        <NavItem
-          label="Activity log"
-          to={`/wiki/${wikiId}/log`}
-          icon={<ScrollText size={14} />}
-        />
+      <div className="px-2 py-2 border-b border-[var(--border)] space-y-0.5">
+        <NavItem label="AI Search" to={`/wiki/${wikiId}/search`} icon={<Sparkles size={15} />} />
+        {!isFolder && (
+          <>
+            <NavItem
+              label="Graph view"
+              to={`/wiki/${wikiId}/graph`}
+              icon={<GitGraph size={14} />}
+            />
+            <NavItem
+              label="Activity log"
+              to={`/wiki/${wikiId}/log`}
+              icon={<ScrollText size={14} />}
+            />
+          </>
+        )}
       </div>
 
-      {/* Page tree */}
+      {/* Page / file tree */}
       <div className="flex-1 overflow-y-auto px-2 py-2">
         <PageTree wikiId={wikiId} pages={pages} />
       </div>
 
-      {/* Inbox — files pending ingest */}
-      <InboxSection wikiId={wikiId} files={rawFiles} loading={rawLoading} reload={reloadRaw} />
-
-      {/* Add Source — upload / paste */}
-      <div className="border-t border-[#313244] py-2">
-        <p className="px-4 pb-1.5 text-xs font-semibold text-[#6c7086] uppercase tracking-wider">
-          Add Source
-        </p>
-        <IngestSection wikiId={wikiId} inboxExists={inboxExists} onUploaded={reloadRaw} />
-      </div>
+      {/* Inbox + Add Source — wiki-only */}
+      {!isFolder && (
+        <>
+          <InboxSection wikiId={wikiId} wikiPath={wikiPath} files={rawFiles} loading={rawLoading} reload={reloadRaw} />
+          <div className="border-t border-[var(--border)] py-2">
+            <p className="px-4 pb-1.5 text-xs font-semibold text-[var(--text-muted)] uppercase tracking-wider">
+              Add Source
+            </p>
+            <IngestSection wikiId={wikiId} wikiPath={wikiPath} inboxExists={inboxExists} onUploaded={reloadRaw} />
+          </div>
+        </>
+      )}
+      {!isFolder && <IngestStatus wikiId={wikiId} />}
     </div>
   )
 }

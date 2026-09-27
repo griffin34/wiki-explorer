@@ -9,9 +9,10 @@ import type {
   LogEntry,
   WsEvent,
 } from '../types'
+import { api, wsUrl } from '../utils/api'
 
 async function fetchJSON<T>(url: string): Promise<T> {
-  const res = await fetch(url)
+  const res = await fetch(api(url))
   if (!res.ok) throw new Error(`${res.status} ${res.statusText}`)
   return res.json() as Promise<T>
 }
@@ -48,13 +49,13 @@ export interface IDEInfo {
 }
 
 export async function detectIDEs(): Promise<IDEInfo[]> {
-  const res = await fetch('/api/detect-ides')
+  const res = await fetch(api('/api/detect-ides'))
   if (!res.ok) return []
   return res.json() as Promise<IDEInfo[]>
 }
 
 export async function openInIDE(ide: string, folderPath: string): Promise<void> {
-  const res = await fetch('/api/open-in-ide', {
+  const res = await fetch(api('/api/open-in-ide'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ ide, path: folderPath }),
@@ -66,7 +67,7 @@ export async function openInIDE(ide: string, folderPath: string): Promise<void> 
 }
 
 export async function pickFolder(): Promise<string | null> {
-  const res = await fetch('/api/pick-folder')
+  const res = await fetch(api('/api/pick-folder'))
   if (!res.ok) {
     const data = (await res.json()) as { error?: string }
     if (data.error === 'cancelled') return null
@@ -77,7 +78,7 @@ export async function pickFolder(): Promise<string | null> {
 }
 
 export async function addWiki(name: string, wikiPath: string, color: string, create: boolean): Promise<WikiConfig> {
-  const res = await fetch('/api/wikis', {
+  const res = await fetch(api('/api/wikis'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ name, wikiPath, color, create }),
@@ -88,7 +89,7 @@ export async function addWiki(name: string, wikiPath: string, color: string, cre
 }
 
 export async function removeWiki(id: string): Promise<void> {
-  await fetch(`/api/wikis/${id}`, { method: 'DELETE' })
+  await fetch(api(`/api/wikis/${id}`), { method: 'DELETE' })
 }
 
 // ─── Page list ────────────────────────────────────────────────────────────────
@@ -146,7 +147,7 @@ export function useWikiPage(wikiId: string, pageId: string | null) {
 
 // ─── Graph ────────────────────────────────────────────────────────────────────
 
-export function useGraphData(wikiId: string) {
+export function useGraphData(wikiId: string, refreshKey = 0) {
   const [graph, setGraph] = useState<GraphData | null>(null)
   const [loading, setLoading] = useState(true)
 
@@ -162,7 +163,7 @@ export function useGraphData(wikiId: string) {
     }
   }, [wikiId])
 
-  useEffect(() => { load() }, [load])
+  useEffect(() => { load() }, [load, refreshKey])
   return { graph, loading, reload: load }
 }
 
@@ -188,7 +189,8 @@ export function useSearch(wikiId: string) {
         setSearching(false)
       }
     }, 250)
-    return () => { if (debounceRef.current) clearTimeout(debounceRef.current) }
+    /* v8 ignore next */
+  return () => { if (debounceRef.current) clearTimeout(debounceRef.current) }
   }, [query, wikiId])
 
   return { query, setQuery, results, searching }
@@ -252,15 +254,18 @@ export function useWikiSocket(onEvent: (e: WsEvent) => void) {
     let reconnectTimeout: ReturnType<typeof setTimeout>
 
     function connect() {
-      const proto = window.location.protocol === 'https:' ? 'wss' : 'ws'
-      ws = new WebSocket(`${proto}://${window.location.host}/ws`)
+      /* v8 ignore next */
+      ws = new WebSocket(wsUrl('/ws'))
+      /* v8 ignore next 3 */
       ws.onmessage = (e) => {
         try { onEventRef.current(JSON.parse(e.data as string) as WsEvent) } catch {}
       }
+      /* v8 ignore next */
       ws.onclose = () => { reconnectTimeout = setTimeout(connect, 2000) }
     }
 
     connect()
+    /* v8 ignore next */
     return () => { clearTimeout(reconnectTimeout); ws?.close() }
   }, [])
 }

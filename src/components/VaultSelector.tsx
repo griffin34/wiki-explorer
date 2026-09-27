@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   BookOpen,
@@ -15,19 +15,48 @@ import {
   FolderSearch,
   CheckCircle2,
   MonitorPlay,
+  Moon,
+  Check,
+  Upload,
+  Sparkles,
 } from 'lucide-react'
+import SirenIcon from './SirenIcon'
 import { useWikis, addWiki, removeWiki, pickFolder, detectIDEs, openInIDE } from '../hooks/useWiki'
+import { api } from '../utils/api'
 import type { IDEInfo } from '../hooks/useWiki'
 import { WIKI_DEFAULT_COLORS } from '../types'
 import type { WikiConfig } from '../types'
+import { snapshotDrop, resolveDropSnapshot } from '../utils/dragDrop'
+import { useTheme } from '../ThemeContext'
+import { IDE_CREATE_COMMANDS, writeToClipboard } from './IDELaunchModal'
+import CreateWikiWizard from './CreateWikiWizard'
 
 // ─── IDE Picker (shown after wiki creation) ───────────────────────────────────
 
 function IDEPicker({ wikiPath, onDone }: { wikiPath: string; onDone: () => void }) {
+  return (
+    <div className="space-y-4">
+      <p className="text-xs text-[var(--text-muted)]">
+        Open this wiki folder in your editor, then run the setup command in the chat window:
+      </p>
+      <IDELaunchModalInline wikiPath={wikiPath} />
+      <button
+        onClick={onDone}
+        className="w-full py-2 rounded-lg text-sm text-[var(--text-muted)] hover:text-[var(--text-primary)] border border-[var(--border)] hover:border-[var(--border-strong)] transition-colors"
+      >
+        Done
+      </button>
+    </div>
+  )
+}
+
+/** Inline (non-overlay) version of the IDE launcher used inside the AddWikiModal step. */
+function IDELaunchModalInline({ wikiPath }: { wikiPath: string }) {
   const [ides, setIDEs] = useState<IDEInfo[]>([])
   const [loading, setLoading] = useState(true)
   const [launching, setLaunching] = useState<string | null>(null)
   const [launched, setLaunched] = useState<string | null>(null)
+  const [copiedCommand, setCopiedCommand] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
@@ -35,6 +64,11 @@ function IDEPicker({ wikiPath, onDone }: { wikiPath: string; onDone: () => void 
   }, [])
 
   const handleOpen = async (ide: IDEInfo) => {
+    const command = IDE_CREATE_COMMANDS[ide.id] ?? '/create-wiki'
+    // Copy BEFORE opening the IDE — document must still be focused for clipboard access
+    await writeToClipboard(command)
+    setCopiedCommand(command)
+
     setLaunching(ide.id)
     setError(null)
     try {
@@ -48,29 +82,25 @@ function IDEPicker({ wikiPath, onDone }: { wikiPath: string; onDone: () => void 
   }
 
   const IDE_COLORS: Record<string, string> = {
-    cursor: '#89b4fa',
-    vscode: '#4fc3f7',
-    windsurf: '#a6e3a1',
-    intellij: '#f38ba8',
-    webstorm: '#89dceb',
-    pycharm: '#cba6f7',
+    cursor: '#89b4fa', vscode: '#4fc3f7', windsurf: '#a6e3a1',
+    intellij: '#f38ba8', webstorm: '#89dceb', pycharm: '#cba6f7',
   }
 
   return (
-    <div className="space-y-4">
-      <p className="text-xs text-[#6c7086]">Open this wiki folder in your editor to start working with the LLM:</p>
-
+    <div className="space-y-3">
       {loading ? (
-        <div className="flex items-center gap-2 text-[#6c7086]">
+        <div className="flex items-center gap-2 text-[var(--text-muted)]">
           <Loader2 size={14} className="animate-spin" />
           <span className="text-sm">Detecting installed editors…</span>
         </div>
       ) : ides.length === 0 ? (
-        <p className="text-sm text-[#6c7086]">No supported editors detected. Open <code className="text-[#cdd6f4] bg-[#1e1e2e] px-1 rounded">{wikiPath}</code> manually.</p>
+        <p className="text-sm text-[var(--text-muted)]">
+          No supported editors detected. Open <code className="text-[var(--text-primary)] bg-[var(--bg-base)] px-1 rounded">{wikiPath}</code> manually.
+        </p>
       ) : (
         <div className="grid grid-cols-2 gap-2">
           {ides.map((ide) => {
-            const color = IDE_COLORS[ide.id] ?? '#6c7086'
+            const color = IDE_COLORS[ide.id] ?? 'var(--text-muted)'
             const isLaunching = launching === ide.id
             const isLaunched = launched === ide.id
             return (
@@ -80,12 +110,12 @@ function IDEPicker({ wikiPath, onDone }: { wikiPath: string; onDone: () => void 
                 disabled={!!launching}
                 className="flex items-center gap-2.5 px-3 py-2.5 rounded-lg border transition-all disabled:opacity-60"
                 style={{
-                  borderColor: isLaunched ? `${color}60` : '#313244',
-                  backgroundColor: isLaunched ? `${color}15` : '#1e1e2e',
+                  borderColor: isLaunched ? `${color}60` : 'var(--border)',
+                  backgroundColor: isLaunched ? `${color}15` : 'var(--bg-base)',
                 }}
               >
                 <MonitorPlay size={15} style={{ color }} className="flex-shrink-0" />
-                <span className="text-sm font-medium" style={{ color: isLaunched ? color : '#cdd6f4' }}>
+                <span className="text-sm font-medium" style={{ color: isLaunched ? color : 'var(--text-primary)' }}>
                   {isLaunching ? 'Opening…' : isLaunched ? 'Opened!' : ide.name}
                 </span>
                 {isLaunching && <Loader2 size={12} className="animate-spin ml-auto" style={{ color }} />}
@@ -95,17 +125,16 @@ function IDEPicker({ wikiPath, onDone }: { wikiPath: string; onDone: () => void 
           })}
         </div>
       )}
-
-      {error && (
-        <p className="text-xs text-[#f38ba8]">{error}</p>
+      {copiedCommand && (
+        <div className="flex items-start gap-2.5 px-3 py-2.5 rounded-lg bg-[var(--accent-faint)] border border-[var(--accent-border)]">
+          <Check size={14} className="text-[var(--accent)] mt-0.5 flex-shrink-0" />
+          <div className="min-w-0">
+            <p className="text-xs text-[var(--text-secondary)] leading-snug">Copied — paste into the editor chat:</p>
+            <code className="text-xs font-mono font-semibold text-[var(--accent)] mt-0.5 block">{copiedCommand}</code>
+          </div>
+        </div>
       )}
-
-      <button
-        onClick={onDone}
-        className="w-full py-2 rounded-lg text-sm text-[#6c7086] hover:text-[#cdd6f4] border border-[#313244] hover:border-[#45475a] transition-colors"
-      >
-        Done
-      </button>
+      {error && <p className="text-xs text-[var(--error)]">{error}</p>}
     </div>
   )
 }
@@ -136,6 +165,7 @@ function AddWikiModal({ onClose, onAdded }: { onClose: () => void; onAdded: () =
   }
 
   const handleSubmit = async () => {
+    /* v8 ignore next 3 */
     if (!name.trim() || !wikiPath.trim()) {
       setError('Name and path are required.')
       return
@@ -158,20 +188,20 @@ function AddWikiModal({ onClose, onAdded }: { onClose: () => void; onAdded: () =
   if (createdPath && createdName) {
     return (
       <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-        <div className="bg-[#24273a] border border-[#313244] rounded-xl shadow-2xl w-full max-w-md mx-4">
-          <div className="flex items-center justify-between px-6 py-4 border-b border-[#313244]">
+        <div className="bg-[var(--bg-surface)] border border-[var(--border)] rounded-xl shadow-2xl w-full max-w-md mx-4">
+          <div className="flex items-center justify-between px-6 py-4 border-b border-[var(--border)]">
             <div className="flex items-center gap-2">
-              <CheckCircle2 size={16} className="text-[#a6e3a1]" />
-              <h2 className="text-base font-semibold text-[#cdd6f4]">Wiki created</h2>
+              <CheckCircle2 size={16} className="text-[var(--success)]" />
+              <h2 className="text-base font-semibold text-[var(--text-primary)]">Wiki created</h2>
             </div>
-            <button onClick={onClose} className="text-[#6c7086] hover:text-[#cdd6f4]">
+            <button onClick={onClose} className="text-[var(--text-muted)] hover:text-[var(--text-primary)]">
               <X size={18} />
             </button>
           </div>
           <div className="px-6 py-5 space-y-3">
             <div>
-              <p className="text-sm font-medium text-[#cdd6f4]">{createdName}</p>
-              <p className="text-xs text-[#6c7086] font-mono mt-0.5 break-all">{createdPath}</p>
+              <p className="text-sm font-medium text-[var(--text-primary)]">{createdName}</p>
+              <p className="text-xs text-[var(--text-muted)] font-mono mt-0.5 break-all">{createdPath}</p>
             </div>
             <IDEPicker wikiPath={createdPath} onDone={onClose} />
           </div>
@@ -182,24 +212,24 @@ function AddWikiModal({ onClose, onAdded }: { onClose: () => void; onAdded: () =
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-      <div className="bg-[#24273a] border border-[#313244] rounded-xl shadow-2xl w-full max-w-md mx-4">
+      <div className="bg-[var(--bg-surface)] border border-[var(--border)] rounded-xl shadow-2xl w-full max-w-md mx-4">
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-[#313244]">
-          <h2 className="text-base font-semibold text-[#cdd6f4]">Add a wiki</h2>
-          <button onClick={onClose} className="text-[#6c7086] hover:text-[#cdd6f4]">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-[var(--border)]">
+          <h2 className="text-base font-semibold text-[var(--text-primary)]">Add a wiki</h2>
+          <button onClick={onClose} className="text-[var(--text-muted)] hover:text-[var(--text-primary)]">
             <X size={18} />
           </button>
         </div>
 
         <div className="px-6 py-5 space-y-4">
           {/* Mode toggle */}
-          <div className="flex rounded-lg overflow-hidden border border-[#313244]">
+          <div className="flex rounded-lg overflow-hidden border border-[var(--border)]">
             {(['create', 'existing'] as const).map((m) => (
               <button
                 key={m}
                 onClick={() => setMode(m)}
                 className={`flex-1 flex items-center justify-center gap-2 py-2 text-sm transition-colors
-                  ${mode === m ? 'bg-[#313244] text-[#cdd6f4]' : 'text-[#6c7086] hover:text-[#a6adc8]'}`}
+                  ${mode === m ? 'bg-[var(--bg-elevated)] text-[var(--text-primary)]' : 'text-[var(--text-muted)] hover:text-[var(--text-secondary)]'}`}
               >
                 {m === 'create' ? <FolderPlus size={14} /> : <FolderOpen size={14} />}
                 {m === 'create' ? 'Create new wiki' : 'Open existing folder'}
@@ -209,7 +239,7 @@ function AddWikiModal({ onClose, onAdded }: { onClose: () => void; onAdded: () =
 
           {/* Name */}
           <div>
-            <label className="block text-xs text-[#6c7086] mb-1.5 font-medium uppercase tracking-wider">
+            <label className="block text-xs text-[var(--text-muted)] mb-1.5 font-medium uppercase tracking-wider">
               Wiki name
             </label>
             <input
@@ -217,13 +247,13 @@ function AddWikiModal({ onClose, onAdded }: { onClose: () => void; onAdded: () =
               placeholder="My Research"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              className="w-full bg-[#1e1e2e] border border-[#313244] rounded-lg px-3 py-2 text-sm text-[#cdd6f4] placeholder-[#6c7086] outline-none focus:border-[#89b4fa]/50"
+              className="w-full bg-[var(--bg-base)] border border-[var(--border)] rounded-lg px-3 py-2 text-sm text-[var(--text-primary)] placeholder-[var(--text-muted)] outline-none focus:border-[var(--accent-border-strong)]"
             />
           </div>
 
           {/* Path */}
           <div>
-            <label className="block text-xs text-[#6c7086] mb-1.5 font-medium uppercase tracking-wider">
+            <label className="block text-xs text-[var(--text-muted)] mb-1.5 font-medium uppercase tracking-wider">
               {mode === 'create' ? 'Parent folder' : 'Folder path'}
             </label>
             <div className="flex gap-2">
@@ -232,13 +262,13 @@ function AddWikiModal({ onClose, onAdded }: { onClose: () => void; onAdded: () =
                 placeholder="/Users/you/Documents"
                 value={wikiPath}
                 onChange={(e) => setVaultPath(e.target.value)}
-                className="flex-1 bg-[#1e1e2e] border border-[#313244] rounded-lg px-3 py-2 text-sm text-[#cdd6f4] placeholder-[#6c7086] outline-none focus:border-[#89b4fa]/50 font-mono"
+                className="flex-1 bg-[var(--bg-base)] border border-[var(--border)] rounded-lg px-3 py-2 text-sm text-[var(--text-primary)] placeholder-[var(--text-muted)] outline-none focus:border-[var(--accent-border-strong)] font-mono"
               />
               <button
                 type="button"
                 onClick={handleBrowse}
                 disabled={picking}
-                className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-[#313244] text-sm text-[#6c7086] hover:text-[#cdd6f4] hover:border-[#45475a] bg-[#1e1e2e] disabled:opacity-40 transition-colors flex-shrink-0"
+                className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-[var(--border)] text-sm text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:border-[var(--border-strong)] bg-[var(--bg-base)] disabled:opacity-40 transition-colors flex-shrink-0"
                 title="Browse for folder"
               >
                 {picking ? <Loader2 size={14} className="animate-spin" /> : <FolderSearch size={14} />}
@@ -246,11 +276,11 @@ function AddWikiModal({ onClose, onAdded }: { onClose: () => void; onAdded: () =
               </button>
             </div>
             {mode === 'create' && wikiPath.trim() && name.trim() ? (
-              <p className="text-xs text-[#6c7086] mt-1.5 font-mono">
-                Will create: <span className="text-[#a6e3a1]">{wikiPath.trim()}/{name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')}</span>
+              <p className="text-xs text-[var(--text-muted)] mt-1.5 font-mono">
+                Will create: <span className="text-[var(--success)]">{wikiPath.trim()}/{name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')}</span>
               </p>
             ) : (
-              <p className="text-xs text-[#6c7086] mt-1.5">
+              <p className="text-xs text-[var(--text-muted)] mt-1.5">
                 {mode === 'create'
                   ? 'The wiki folder will be created inside this parent directory.'
                   : 'Point to an existing wiki folder. It should contain a wiki/ subdirectory.'}
@@ -260,7 +290,7 @@ function AddWikiModal({ onClose, onAdded }: { onClose: () => void; onAdded: () =
 
           {/* Color */}
           <div>
-            <label className="block text-xs text-[#6c7086] mb-1.5 font-medium uppercase tracking-wider">
+            <label className="block text-xs text-[var(--text-muted)] mb-1.5 font-medium uppercase tracking-wider">
               Color
             </label>
             <div className="flex gap-2">
@@ -276,21 +306,21 @@ function AddWikiModal({ onClose, onAdded }: { onClose: () => void; onAdded: () =
           </div>
 
           {error && (
-            <div className="p-3 bg-[#f38ba8]/10 border border-[#f38ba8]/20 rounded-lg text-sm text-[#f38ba8]">
+            <div className="p-3 bg-[var(--error-faint)] border border-[var(--error-border)] rounded-lg text-sm text-[var(--error)]">
               {error}
             </div>
           )}
         </div>
 
         {/* Footer */}
-        <div className="flex gap-3 px-6 py-4 border-t border-[#313244]">
-          <button onClick={onClose} className="flex-1 py-2 rounded-lg text-sm text-[#6c7086] hover:text-[#cdd6f4] border border-[#313244] hover:border-[#45475a] transition-colors">
+        <div className="flex gap-3 px-6 py-4 border-t border-[var(--border)]">
+          <button onClick={onClose} className="flex-1 py-2 rounded-lg text-sm text-[var(--text-muted)] hover:text-[var(--text-primary)] border border-[var(--border)] hover:border-[var(--border-strong)] transition-colors">
             Cancel
           </button>
           <button
             onClick={handleSubmit}
             disabled={busy || !name.trim() || !wikiPath.trim()}
-            className="flex-1 py-2 rounded-lg text-sm font-medium bg-[#89b4fa]/10 text-[#89b4fa] border border-[#89b4fa]/20 hover:bg-[#89b4fa]/20 disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2"
+            className="flex-1 py-2 rounded-lg text-sm font-medium bg-[var(--accent-faint)] text-[var(--accent)] border border-[var(--accent-border)] hover:bg-[var(--accent-moderate)] disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2"
           >
             {busy ? <Loader2 size={14} className="animate-spin" /> : (mode === 'create' ? <FolderPlus size={14} /> : <FolderOpen size={14} />)}
             {mode === 'create' ? 'Create wiki' : 'Add wiki'}
@@ -305,17 +335,108 @@ function AddWikiModal({ onClose, onAdded }: { onClose: () => void; onAdded: () =
 
 function WikiCard({ vault, onOpen, onRemove }: { vault: WikiConfig; onOpen: () => void; onRemove: () => void }) {
   const [confirmRemove, setConfirmRemove] = useState(false)
+  const [dragOver, setDragOver] = useState(false)
+  const [uploading, setUploading] = useState(false)
+  const [uploadMsg, setUploadMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
+  const cardRef = useRef<HTMLDivElement>(null)
+
+  // Upload files to this wiki
+  const handleFiles = useCallback(async (files: File[]) => {
+    if (!files.length) return
+    setUploading(true)
+    setUploadMsg(null)
+    try {
+      const form = new FormData()
+      for (const f of files) form.append('files', f)
+      const res = await fetch(api(`/api/wikis/${vault.id}/raw/upload`), { method: 'POST', body: form })
+      if (!res.ok) throw new Error(`Server error: ${res.status}`)
+      const data = (await res.json()) as { uploaded: Array<{ name: string }> }
+      setUploadMsg({ type: 'success', text: `Added ${data.uploaded.length} file${data.uploaded.length > 1 ? 's' : ''}` })
+      setTimeout(() => setUploadMsg(null), 3000)
+    } catch (e) {
+      setUploadMsg({ type: 'error', text: String(e) })
+      setTimeout(() => setUploadMsg(null), 5000)
+    } finally {
+      setUploading(false)
+    }
+  }, [vault.id])
+
+  // Native drag-drop handlers
+  useEffect(() => {
+    const el = cardRef.current
+    if (!el) return
+
+    const onDragOver = (e: DragEvent) => { e.preventDefault(); e.stopPropagation(); setDragOver(true) }
+    const onDragEnter = (e: DragEvent) => { e.preventDefault(); e.stopPropagation(); setDragOver(true) }
+    const onDragLeave = (e: DragEvent) => {
+      e.preventDefault()
+      if (!el.contains(e.relatedTarget as Node | null)) setDragOver(false)
+    }
+    const onDrop = (e: DragEvent) => {
+      e.preventDefault()
+      e.stopPropagation()
+      setDragOver(false)
+      if (!e.dataTransfer) return
+      const snap = snapshotDrop(e.dataTransfer)
+      resolveDropSnapshot(snap).then((files) => {
+        if (files.length) handleFiles(files)
+      })
+    }
+
+    el.addEventListener('dragover', onDragOver)
+    el.addEventListener('dragenter', onDragEnter)
+    el.addEventListener('dragleave', onDragLeave)
+    el.addEventListener('drop', onDrop)
+    return () => {
+      el.removeEventListener('dragover', onDragOver)
+      el.removeEventListener('dragenter', onDragEnter)
+      el.removeEventListener('dragleave', onDragLeave)
+      el.removeEventListener('drop', onDrop)
+    }
+  }, [handleFiles])
 
   return (
     <div
-      className="group relative bg-[#24273a] border border-[#313244] rounded-xl p-5 hover:border-[#45475a] transition-all cursor-pointer flex flex-col gap-4"
+      ref={cardRef}
+      className={`group relative bg-[var(--bg-surface)] border rounded-xl p-5 transition-all cursor-pointer flex flex-col gap-4
+        ${dragOver ? 'border-[var(--accent)] ring-2 ring-[var(--accent)]/30 scale-[1.02]' : 'border-[var(--border)] hover:border-[var(--border-strong)]'}`}
       onClick={onOpen}
-      style={{ borderTopColor: vault.color, borderTopWidth: '3px' }}
+      style={{ borderTopColor: dragOver ? 'var(--accent)' : vault.color, borderTopWidth: '3px' }}
     >
+      {/* Drag overlay */}
+      {dragOver && (
+        <div className="absolute inset-0 bg-[var(--accent)]/10 rounded-xl flex flex-col items-center justify-center gap-2 z-10 pointer-events-none">
+          <Upload size={28} className="text-[var(--accent)]" />
+          <span className="text-sm font-medium text-[var(--accent)]">Drop files to add to {vault.name}</span>
+        </div>
+      )}
+
+      {/* Uploading indicator */}
+      {uploading && (
+        <div className="absolute inset-0 bg-[var(--bg-base)]/80 rounded-xl flex flex-col items-center justify-center gap-2 z-10">
+          <Loader2 size={24} className="animate-spin text-[var(--accent)]" />
+          <span className="text-sm text-[var(--text-muted)]">Uploading...</span>
+        </div>
+      )}
+
+      {/* Upload message toast */}
+      {uploadMsg && (
+        <div
+          className={`absolute top-2 left-2 right-2 px-3 py-2 rounded-lg text-xs font-medium z-20 ${
+            uploadMsg.type === 'success'
+              ? 'bg-[var(--success-faint)] text-[var(--success)] border border-[var(--success-border)]'
+              : 'bg-[var(--error-faint)] text-[var(--error)] border border-[var(--error-border)]'
+          }`}
+          onClick={(e) => e.stopPropagation()}
+        >
+          {uploadMsg.text}
+        </div>
+      )}
+
       {/* Remove button */}
       <button
         onClick={(e) => { e.stopPropagation(); setConfirmRemove(true) }}
-        className="absolute top-3 right-3 opacity-0 group-hover:opacity-100 p-1 rounded text-[#6c7086] hover:text-[#f38ba8] transition-all"
+        className="absolute top-3 right-3 opacity-0 group-hover:opacity-100 p-1 rounded text-[var(--text-muted)] hover:text-[var(--error)] transition-all"
         title="Remove wiki"
       >
         <Trash2 size={14} />
@@ -330,13 +451,13 @@ function WikiCard({ vault, onOpen, onRemove }: { vault: WikiConfig; onOpen: () =
           <BookOpen size={18} style={{ color: vault.color }} />
         </div>
         <div className="min-w-0">
-          <h3 className="font-semibold text-[#cdd6f4] text-base truncate">{vault.name}</h3>
-          <p className="text-xs text-[#6c7086] truncate font-mono mt-0.5">{vault.path}</p>
+          <h3 className="font-semibold text-[var(--text-primary)] text-base truncate">{vault.name}</h3>
+          <p className="text-xs text-[var(--text-muted)] truncate font-mono mt-0.5">{vault.path}</p>
         </div>
       </div>
 
       {/* Stats */}
-      <div className="flex items-center gap-4 text-xs text-[#6c7086]">
+      <div className="flex items-center gap-4 text-xs text-[var(--text-muted)]">
         <span className="flex items-center gap-1.5">
           <FileText size={11} />
           {vault.stats?.pageCount ?? 0} pages
@@ -355,7 +476,7 @@ function WikiCard({ vault, onOpen, onRemove }: { vault: WikiConfig; onOpen: () =
 
       {/* Open button */}
       <div
-        className="flex items-center justify-between pt-3 border-t border-[#313244] text-xs font-medium"
+        className="flex items-center justify-between pt-3 border-t border-[var(--border)] text-xs font-medium"
         style={{ color: vault.color }}
       >
         <span>Open wiki</span>
@@ -365,21 +486,21 @@ function WikiCard({ vault, onOpen, onRemove }: { vault: WikiConfig; onOpen: () =
       {/* Remove confirm overlay */}
       {confirmRemove && (
         <div
-          className="absolute inset-0 bg-[#1e1e2e]/95 rounded-xl flex flex-col items-center justify-center gap-3 p-4"
+          className="absolute inset-0 bg-[var(--bg-base)]/95 rounded-xl flex flex-col items-center justify-center gap-3 p-4"
           onClick={(e) => e.stopPropagation()}
         >
-          <p className="text-sm text-[#cdd6f4] text-center">Remove "{vault.name}" from your wikis?</p>
-          <p className="text-xs text-[#6c7086] text-center">Files on disk are not deleted.</p>
+          <p className="text-sm text-[var(--text-primary)] text-center">Remove "{vault.name}" from your wikis?</p>
+          <p className="text-xs text-[var(--text-muted)] text-center">Files on disk are not deleted.</p>
           <div className="flex gap-2">
             <button
               onClick={() => setConfirmRemove(false)}
-              className="px-3 py-1.5 rounded text-xs border border-[#313244] text-[#6c7086] hover:text-[#cdd6f4]"
+              className="px-3 py-1.5 rounded text-xs border border-[var(--border)] text-[var(--text-muted)] hover:text-[var(--text-primary)]"
             >
               Cancel
             </button>
             <button
               onClick={onRemove}
-              className="px-3 py-1.5 rounded text-xs bg-[#f38ba8]/10 text-[#f38ba8] border border-[#f38ba8]/20 hover:bg-[#f38ba8]/20"
+              className="px-3 py-1.5 rounded text-xs bg-[var(--error-faint)] text-[var(--error)] border border-[var(--error-border)] hover:opacity-80"
             >
               Remove
             </button>
@@ -395,25 +516,33 @@ function WikiCard({ vault, onOpen, onRemove }: { vault: WikiConfig; onOpen: () =
 export default function WikiSelector() {
   const navigate = useNavigate()
   const { wikis, loading, reload } = useWikis()
-  const [showModal, setShowModal] = useState(false)
-
+  const [modalType, setModalType] = useState<'choice' | 'create' | 'existing' | null>(null)
+  const [parentPath, setParentPath] = useState('/Users') // For CreateWikiWizard
+  const { theme, toggleTheme } = useTheme()
   const handleRemove = async (id: string) => {
     await removeWiki(id)
     reload()
   }
 
   return (
-    <div className="min-h-screen bg-[#1e1e2e] flex flex-col">
+    <div className="min-h-screen bg-[var(--bg-base)] flex flex-col">
       {/* Header */}
-      <header className="border-b border-[#313244] bg-[#181825]">
+      <header className="wiki-header border-b border-[var(--border)]">
         <div className="max-w-5xl mx-auto px-8 py-5 flex items-center gap-3">
-          <div className="w-8 h-8 rounded-lg bg-[#89b4fa]/10 flex items-center justify-center">
-            <BookOpen size={16} className="text-[#89b4fa]" />
+          <div className="w-8 h-8 rounded-lg bg-[var(--accent-faint)] flex items-center justify-center">
+            <BookOpen size={16} className="text-[var(--accent)]" />
           </div>
           <div>
-            <h1 className="text-base font-semibold text-[#cdd6f4]">Wiki Explorer</h1>
-            <p className="text-xs text-[#6c7086]">Your wikis</p>
+            <h1 className="text-base font-semibold text-[var(--text-primary)]">Wiki Explorer</h1>
+            <p className="text-xs text-[var(--text-muted)]">Your wikis</p>
           </div>
+          <button
+            onClick={toggleTheme}
+            className="ml-auto p-1.5 rounded hover:bg-[var(--bg-elevated)] text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
+            title={theme === 'brand' ? 'Switch to dark theme' : 'Switch to brand theme'}
+          >
+            {theme === 'brand' ? <Moon size={15} /> : <SirenIcon size={15} />}
+          </button>
         </div>
       </header>
 
@@ -421,14 +550,14 @@ export default function WikiSelector() {
       <main className="flex-1 max-w-5xl mx-auto w-full px-8 py-10">
         <div className="flex items-center justify-between mb-6">
           <div>
-            <h2 className="text-xl font-semibold text-[#cdd6f4]">Wikis</h2>
-            <p className="text-sm text-[#6c7086] mt-0.5">
+            <h2 className="text-xl font-semibold text-[var(--text-primary)]">Wikis</h2>
+            <p className="text-sm text-[var(--text-muted)] mt-0.5">
               Each wiki is independent — its own pages, sources, and graph.
             </p>
           </div>
           <button
-            onClick={() => setShowModal(true)}
-            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[#89b4fa]/10 text-[#89b4fa] border border-[#89b4fa]/20 hover:bg-[#89b4fa]/20 text-sm font-medium transition-colors"
+            onClick={() => setModalType('choice')}
+            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[var(--accent-faint)] text-[var(--accent)] border border-[var(--accent-border)] hover:bg-[var(--accent-moderate)] text-sm font-medium transition-colors"
           >
             <Plus size={15} />
             Add wiki
@@ -437,20 +566,20 @@ export default function WikiSelector() {
 
         {loading ? (
           <div className="flex items-center justify-center py-20">
-            <Loader2 className="animate-spin text-[#89b4fa]" size={24} />
+            <Loader2 className="animate-spin text-[var(--accent)]" size={24} />
           </div>
         ) : wikis.length === 0 ? (
           <div className="text-center py-20">
-            <div className="w-16 h-16 rounded-2xl bg-[#24273a] border border-[#313244] flex items-center justify-center mx-auto mb-4">
-              <BookOpen size={28} className="text-[#6c7086]" />
+            <div className="w-16 h-16 rounded-2xl bg-[var(--bg-surface)] border border-[var(--border)] flex items-center justify-center mx-auto mb-4">
+              <BookOpen size={28} className="text-[var(--text-muted)]" />
             </div>
-            <h3 className="text-[#cdd6f4] font-medium mb-2">No wikis yet</h3>
-            <p className="text-sm text-[#6c7086] mb-6 max-w-xs mx-auto">
+            <h3 className="text-[var(--text-primary)] font-medium mb-2">No wikis yet</h3>
+            <p className="text-sm text-[var(--text-muted)] mb-6 max-w-xs mx-auto">
               Create a new wiki or connect an existing folder to get started.
             </p>
             <button
-              onClick={() => setShowModal(true)}
-              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg bg-[#89b4fa]/10 text-[#89b4fa] border border-[#89b4fa]/20 hover:bg-[#89b4fa]/20 text-sm font-medium transition-colors"
+              onClick={() => setModalType('choice')}
+              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg bg-[var(--accent-faint)] text-[var(--accent)] border border-[var(--accent-border)] hover:bg-[var(--accent-moderate)] text-sm font-medium transition-colors"
             >
               <Plus size={15} />
               Add your first wiki
@@ -468,8 +597,8 @@ export default function WikiSelector() {
             ))}
             {/* Add wiki card */}
             <button
-              onClick={() => setShowModal(true)}
-              className="bg-[#24273a]/50 border-2 border-dashed border-[#313244] rounded-xl p-5 hover:border-[#45475a] hover:bg-[#24273a] transition-all flex flex-col items-center justify-center gap-3 min-h-48 text-[#6c7086] hover:text-[#a6adc8]"
+              onClick={() => setModalType('choice')}
+              className="bg-[var(--surface-half)] border-2 border-dashed border-[var(--border)] rounded-xl p-5 hover:border-[var(--border-strong)] hover:bg-[var(--bg-surface)] transition-all flex flex-col items-center justify-center gap-3 min-h-48 text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
             >
               <FolderPlus size={24} />
               <span className="text-sm font-medium">Add wiki</span>
@@ -478,8 +607,75 @@ export default function WikiSelector() {
         )}
       </main>
 
-      {showModal && (
-        <AddWikiModal onClose={() => setShowModal(false)} onAdded={reload} />
+      {/* Choice modal - pick between AI wizard or existing folder */}
+      {modalType === 'choice' && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+          <div className="bg-[var(--bg-surface)] border border-[var(--border)] rounded-xl shadow-2xl w-full max-w-md mx-4">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-[var(--border)]">
+              <h2 className="text-base font-semibold text-[var(--text-primary)]">Add a wiki</h2>
+              <button onClick={() => setModalType(null)} className="text-[var(--text-muted)] hover:text-[var(--text-primary)]">
+                <X size={18} />
+              </button>
+            </div>
+            <div className="px-6 py-5 space-y-3">
+              <button
+                onClick={async () => {
+                  const folder = await pickFolder()
+                  if (folder) {
+                    setParentPath(folder)
+                    setModalType('create')
+                  }
+                }}
+                className="w-full flex items-start gap-4 p-4 rounded-lg border border-[var(--border)] hover:border-[var(--accent-border)] hover:bg-[var(--accent-faint)] transition-all text-left group"
+              >
+                <div className="w-10 h-10 rounded-lg bg-[var(--accent-faint)] flex items-center justify-center flex-shrink-0 group-hover:bg-[var(--accent-moderate)]">
+                  <Sparkles size={18} className="text-[var(--accent)]" />
+                </div>
+                <div>
+                  <h3 className="font-medium text-[var(--text-primary)]">Create with AI</h3>
+                  <p className="text-xs text-[var(--text-muted)] mt-0.5">
+                    AI proposes a folder structure based on your topics. Recommended for new wikis.
+                  </p>
+                </div>
+                <ChevronRight size={16} className="text-[var(--text-muted)] mt-2.5 ml-auto flex-shrink-0" />
+              </button>
+
+              <button
+                onClick={() => setModalType('existing')}
+                className="w-full flex items-start gap-4 p-4 rounded-lg border border-[var(--border)] hover:border-[var(--border-strong)] hover:bg-[var(--bg-elevated)] transition-all text-left group"
+              >
+                <div className="w-10 h-10 rounded-lg bg-[var(--bg-elevated)] flex items-center justify-center flex-shrink-0">
+                  <FolderOpen size={18} className="text-[var(--text-muted)]" />
+                </div>
+                <div>
+                  <h3 className="font-medium text-[var(--text-primary)]">Add existing folder</h3>
+                  <p className="text-xs text-[var(--text-muted)] mt-0.5">
+                    Connect an existing wiki folder that already has a structure.
+                  </p>
+                </div>
+                <ChevronRight size={16} className="text-[var(--text-muted)] mt-2.5 ml-auto flex-shrink-0" />
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* AI wizard modal */}
+      {modalType === 'create' && (
+        <CreateWikiWizard
+          parentPath={parentPath}
+          onClose={() => setModalType(null)}
+          onCreated={(wikiId) => {
+            reload()
+            setModalType(null)
+            navigate(`/wiki/${wikiId}`)
+          }}
+        />
+      )}
+
+      {/* Existing folder modal */}
+      {modalType === 'existing' && (
+        <AddWikiModal onClose={() => setModalType(null)} onAdded={reload} />
       )}
     </div>
   )

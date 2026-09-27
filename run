@@ -1,0 +1,3 @@
+#!/bin/bash
+# Quick start - runs scripts/start-ai.sh
+exec "$(dirname "$0")/scripts/start-ai.sh" "$@"

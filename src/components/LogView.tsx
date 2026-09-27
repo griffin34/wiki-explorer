@@ -38,7 +38,7 @@ export default function LogView() {
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
-        <Loader2 className="animate-spin text-[#89b4fa]" size={24} />
+        <Loader2 className="animate-spin text-[var(--accent)]" size={24} />
       </div>
     )
   }
@@ -46,17 +46,17 @@ export default function LogView() {
   return (
     <div className="max-w-3xl mx-auto px-8 py-10">
       <div className="flex items-center gap-3 mb-8">
-        <ScrollText size={20} className="text-[#89b4fa]" />
-        <h1 className="text-2xl font-semibold text-[#cdd6f4]">Activity Log</h1>
-        <span className="text-sm text-[#6c7086]">({entries.length} entries)</span>
+        <ScrollText size={20} className="text-[var(--accent)]" />
+        <h1 className="text-2xl font-semibold text-[var(--text-primary)]">Activity Log</h1>
+        <span className="text-sm text-[var(--text-muted)]">({entries.length} entries)</span>
       </div>
 
       {entries.length === 0 ? (
-        <p className="text-[#6c7086]">No log entries yet.</p>
+        <p className="text-[var(--text-muted)]">No log entries yet.</p>
       ) : (
         <div className="relative">
           {/* Timeline line */}
-          <div className="absolute left-4 top-0 bottom-0 w-px bg-[#313244]" />
+          <div className="absolute left-4 top-0 bottom-0 w-px bg-[var(--bg-elevated)]" />
 
           <div className="space-y-6">
             {entries.map((entry, i) => {
@@ -84,14 +84,14 @@ export default function LogView() {
                         {type}
                       </span>
                       {title && (
-                        <span className="text-sm font-medium text-[#cdd6f4]">{title}</span>
+                        <span className="text-sm font-medium text-[var(--text-primary)]">{title}</span>
                       )}
                       {date && (
-                        <span className="text-xs text-[#6c7086] ml-auto">{date}</span>
+                        <span className="text-xs text-[var(--text-muted)] ml-auto">{date}</span>
                       )}
                     </div>
                     {entry.body && (
-                      <div className="wiki-prose text-sm text-[#a6adc8]">
+                      <div className="wiki-prose text-sm text-[var(--text-secondary)]">
                         <ReactMarkdown remarkPlugins={[remarkGfm]}>{entry.body}</ReactMarkdown>
                       </div>
                     )}

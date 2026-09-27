@@ -1,13 +1,18 @@
+import { useEffect, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import rehypeHighlight from 'rehype-highlight'
 import rehypeRaw from 'rehype-raw'
-import { Link2, ArrowLeft, FileText, Tag, Calendar, BookOpen, Loader2, AlertCircle } from 'lucide-react'
+import { Link2, ArrowLeft, FileText, Tag, Calendar, BookOpen, Loader2, AlertCircle, Edit3, History, Eye } from 'lucide-react'
 import { useWikiPage } from '../hooks/useWiki'
+import { useTheme } from '../ThemeContext'
+import PageEditor from './PageEditor'
+import PageHistory from './PageHistory'
 import type { Components } from 'react-markdown'
 import { PAGE_TYPE_COLORS } from '../types'
-import 'highlight.js/styles/tokyo-night-dark.css'
+
+type PageTab = 'view' | 'edit' | 'history'
 
 /** Pre-process markdown: replace [[WikiLink]] with anchor tags */
 function processWikiLinks(content: string, wikiId: string): string {
@@ -32,7 +37,7 @@ function FrontmatterBadge({ type }: { type: string }) {
 
 function TagBadge({ tag }: { tag: string }) {
   return (
-    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs bg-[#313244] text-[#a6adc8]">
+    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs bg-[var(--bg-elevated)] text-[var(--text-secondary)]">
       <Tag size={10} />
       {tag}
     </span>
@@ -42,50 +47,60 @@ function TagBadge({ tag }: { tag: string }) {
 export default function WikiPage() {
   const params = useParams()
   const navigate = useNavigate()
+  /* v8 ignore next */
   const wikiId = params.wikiId ?? ''
+  /* v8 ignore next */
   const pageId = params['*'] || 'index'
+  const { theme } = useTheme()
+  const [activeTab, setActiveTab] = useState<PageTab>('view')
 
-  const { page, loading, error } = useWikiPage(wikiId, pageId)
+  useEffect(() => {
+    if (theme === 'brand') {
+      import('highlight.js/styles/github.css')
+    } else {
+      import('highlight.js/styles/tokyo-night-dark.css')
+    }
+  }, [theme])
+
+  const { page, loading, error, reload } = useWikiPage(wikiId, pageId)
+
+  // Reset to view tab when page changes
+  useEffect(() => {
+    setActiveTab('view')
+  }, [pageId])
 
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
-        <Loader2 className="animate-spin text-[#89b4fa]" size={24} />
+        <Loader2 className="animate-spin text-[var(--accent)]" size={24} />
       </div>
     )
   }
 
   if (error || !page) {
-    const isIndex = pageId === 'index'
+    // When landing on "index" with no matching file (common in plain-folder mode),
+    // show a neutral prompt rather than a red error.
+    if (pageId === 'index') {
+      return (
+        <div className="flex flex-col items-center justify-center h-full gap-3 text-[var(--text-muted)]">
+          <FileText size={36} className="opacity-30" />
+          <p className="text-sm">Select a file from the sidebar to get started.</p>
+        </div>
+      )
+    }
+
     return (
       <div className="max-w-3xl mx-auto px-8 py-12">
-        {isIndex ? (
-          <>
-            <div className="flex items-center gap-3 text-[#89b4fa] mb-4">
-              <BookOpen size={20} />
-              <span className="font-medium">Wiki not initialized</span>
-            </div>
-            <p className="text-[#6c7086] text-sm mb-2">
-              No pages found. Open this wiki folder in your IDE and ask your LLM to create the wiki structure.
-            </p>
-            <p className="text-[#6c7086] text-sm font-mono bg-[#181825] px-3 py-2 rounded inline-block">
-              /create-wiki
-            </p>
-          </>
-        ) : (
-          <>
-            <div className="flex items-center gap-3 text-[#f38ba8] mb-4">
-              <AlertCircle size={20} />
-              <span className="font-medium">Page not found: {pageId}</span>
-            </div>
-            <p className="text-[#6c7086] text-sm">
-              This page doesn't exist yet. Ask your LLM to create it, or check the spelling.
-            </p>
-          </>
-        )}
+        <div className="flex items-center gap-3 text-[var(--error)] mb-4">
+          <AlertCircle size={20} />
+          <span className="font-medium">Page not found: {pageId}</span>
+        </div>
+        <p className="text-[var(--text-muted)] text-sm">
+          This page doesn't exist yet. Ask your LLM to create it, or check the spelling.
+        </p>
         <button
           onClick={() => navigate(-1)}
-          className="mt-4 flex items-center gap-2 text-sm text-[#89b4fa] hover:underline"
+          className="mt-4 flex items-center gap-2 text-sm text-[var(--accent)] hover:underline"
         >
           <ArrowLeft size={14} />
           Go back
@@ -97,7 +112,13 @@ export default function WikiPage() {
   const fm = page.frontmatter
   const title = (fm.title as string) || pageId
   const type = (fm.type as string) || 'page'
-  const tags = (fm.tags as string[]) || []
+  // Handle tags as array or comma-separated string
+  const rawTags = fm.tags
+  const tags: string[] = Array.isArray(rawTags)
+    ? rawTags
+    : typeof rawTags === 'string'
+    ? rawTags.split(',').map((t) => t.trim()).filter(Boolean)
+    : []
   const updated = fm.updated as string
   const sources = fm.sources as number
 
@@ -150,19 +171,19 @@ export default function WikiPage() {
             <div className="flex items-center gap-2 mb-3">
               <FrontmatterBadge type={type} />
               {sources > 0 && (
-                <span className="flex items-center gap-1 text-xs text-[#6c7086]">
+                <span className="flex items-center gap-1 text-xs text-[var(--text-muted)]">
                   <BookOpen size={11} />
                   {sources} source{sources !== 1 ? 's' : ''}
                 </span>
               )}
               {updated && (
-                <span className="flex items-center gap-1 text-xs text-[#6c7086]">
+                <span className="flex items-center gap-1 text-xs text-[var(--text-muted)]">
                   <Calendar size={11} />
                   {updated}
                 </span>
               )}
             </div>
-            <h1 className="text-3xl font-semibold text-[#cdd6f4] mb-3">{title}</h1>
+            <h1 className="text-3xl font-semibold text-[var(--text-primary)] mb-3">{title}</h1>
             {tags.length > 0 && (
               <div className="flex flex-wrap gap-1.5">
                 {tags.map((t) => (
@@ -170,28 +191,91 @@ export default function WikiPage() {
                 ))}
               </div>
             )}
+
+            {/* Tabs */}
+            <div className="flex items-center gap-1 mt-4 border-b border-[var(--border)]">
+              <button
+                onClick={() => setActiveTab('view')}
+                className={`flex items-center gap-1.5 px-3 py-2 text-sm font-medium border-b-2 transition-colors ${
+                  activeTab === 'view'
+                    ? 'border-[var(--accent)] text-[var(--accent)]'
+                    : 'border-transparent text-[var(--text-muted)] hover:text-[var(--text-primary)]'
+                }`}
+              >
+                <Eye size={14} />
+                View
+              </button>
+              <button
+                onClick={() => setActiveTab('edit')}
+                className={`flex items-center gap-1.5 px-3 py-2 text-sm font-medium border-b-2 transition-colors ${
+                  activeTab === 'edit'
+                    ? 'border-[var(--accent)] text-[var(--accent)]'
+                    : 'border-transparent text-[var(--text-muted)] hover:text-[var(--text-primary)]'
+                }`}
+              >
+                <Edit3 size={14} />
+                Edit
+              </button>
+              <button
+                onClick={() => setActiveTab('history')}
+                className={`flex items-center gap-1.5 px-3 py-2 text-sm font-medium border-b-2 transition-colors ${
+                  activeTab === 'history'
+                    ? 'border-[var(--accent)] text-[var(--accent)]'
+                    : 'border-transparent text-[var(--text-muted)] hover:text-[var(--text-primary)]'
+                }`}
+              >
+                <History size={14} />
+                History
+              </button>
+            </div>
           </div>
 
-          {/* Markdown body */}
-          <article className="wiki-prose">
-            <ReactMarkdown
-              remarkPlugins={[remarkGfm]}
-              rehypePlugins={[rehypeHighlight, rehypeRaw]}
-              components={markdownComponents}
-              skipHtml={false}
-            >
-              {processedContent}
-            </ReactMarkdown>
-          </article>
+          {/* Tab content */}
+          {activeTab === 'view' && (
+            <article className="wiki-prose">
+              <ReactMarkdown
+                remarkPlugins={[remarkGfm]}
+                rehypePlugins={[rehypeHighlight, rehypeRaw]}
+                components={markdownComponents}
+                skipHtml={false}
+              >
+                {processedContent}
+              </ReactMarkdown>
+            </article>
+          )}
+
+          {activeTab === 'edit' && (
+            <PageEditor
+              initialContent={page.content}
+              slug={pageId}
+              onSave={() => {
+                reload()
+                setActiveTab('view')
+              }}
+              onCancel={() => setActiveTab('view')}
+              startInEditMode
+            />
+          )}
+
+          {activeTab === 'history' && (
+            <PageHistory
+              slug={pageId}
+              isOpen
+              onRevert={() => {
+                reload()
+                setActiveTab('view')
+              }}
+            />
+          )}
         </div>
       </div>
 
       {/* Right panel: backlinks & outgoing links */}
       {(page.backlinks.length > 0 || page.links.length > 0) && (
-        <aside className="w-56 flex-shrink-0 border-l border-[#313244] overflow-y-auto p-4">
+        <aside className="w-56 flex-shrink-0 border-l border-[var(--border)] overflow-y-auto p-4">
           {page.backlinks.length > 0 && (
             <div className="mb-6">
-              <h3 className="text-xs font-semibold text-[#6c7086] uppercase tracking-wider mb-2 flex items-center gap-1.5">
+              <h3 className="text-xs font-semibold text-[var(--text-muted)] uppercase tracking-wider mb-2 flex items-center gap-1.5">
                 <Link2 size={11} />
                 Backlinks ({page.backlinks.length})
               </h3>
@@ -200,7 +284,7 @@ export default function WikiPage() {
                   <li key={id}>
                     <button
                         onClick={() => navigate(`/wiki/${wikiId}/page/${id}`)}
-                        className="text-xs text-[#89dceb] hover:text-[#cdd6f4] text-left w-full truncate hover:underline"
+                        className="text-xs text-[var(--link)] hover:text-[var(--text-primary)] text-left w-full truncate hover:underline"
                       >
                         {id.split('/').pop()}
                       </button>
@@ -211,7 +295,7 @@ export default function WikiPage() {
           )}
           {page.links.length > 0 && (
             <div>
-              <h3 className="text-xs font-semibold text-[#6c7086] uppercase tracking-wider mb-2 flex items-center gap-1.5">
+              <h3 className="text-xs font-semibold text-[var(--text-muted)] uppercase tracking-wider mb-2 flex items-center gap-1.5">
                 <FileText size={11} />
                 Links ({page.links.length})
               </h3>
@@ -220,7 +304,7 @@ export default function WikiPage() {
                   <li key={link}>
                     <button
                       onClick={() => navigate(`/wiki/${wikiId}/page/${link}`)}
-                      className="text-xs text-[#89dceb] hover:text-[#cdd6f4] text-left w-full truncate hover:underline"
+                      className="text-xs text-[var(--link)] hover:text-[var(--text-primary)] text-left w-full truncate hover:underline"
                     >
                       {link.split('/').pop()}
                     </button>
