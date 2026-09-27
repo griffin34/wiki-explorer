@@ -17,8 +17,6 @@ declare global {
       openInboxFolder?: (wikiPath: string) => Promise<void>
       /** Save a provider's API key (encrypted at rest via Electron safeStorage) */
       saveProviderKey: (providerId: string, apiKey: string) => Promise<void>
-      /** List provider ids that currently have a key configured */
-      getConfiguredProviders: () => Promise<string[]>
     }
   }
 }
