@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Optional
 
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -32,6 +33,20 @@ class Settings(BaseSettings):
     @classmethod
     def _coerce_vaults_file(cls, v: object) -> Path:
         return Path(v) if v else Path(__file__).parent.parent / "data" / "vaults.json"
+
+    # AI settings registry — non-secret provider/model choice, resolved like vaults_file
+    ai_settings_file: Path = Path(__file__).parent.parent / "data" / "ai-settings.json"
+
+    @field_validator("ai_settings_file", mode="before")
+    @classmethod
+    def _coerce_ai_settings_file(cls, v: object) -> Path:
+        return Path(v) if v else Path(__file__).parent.parent / "data" / "ai-settings.json"
+
+    # Cloud LLM provider API keys — set via env/.env in dev, or injected by
+    # Electron (from its encrypted store) when running the packaged app.
+    anthropic_api_key: Optional[str] = None
+    openai_api_key: Optional[str] = None
+    xai_api_key: Optional[str] = None
 
     @field_validator("chroma_path", mode="before")
     @classmethod

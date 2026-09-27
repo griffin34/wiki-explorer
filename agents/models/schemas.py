@@ -166,3 +166,32 @@ class ChangelogEntrySchema(BaseModel):
     changes: list[dict]
     affected_pages: list[str]
     user: str
+
+
+# AI provider settings
+
+class ProviderSettings(BaseModel):
+    model: str
+
+
+class AISettings(BaseModel):
+    active_provider: str = "ollama"
+    auto_fallback_to_ollama: bool = True
+    providers: dict[str, ProviderSettings] = {}
+
+
+class AISettingsResponse(BaseModel):
+    """AISettings plus which providers currently have a key set (never the keys themselves)."""
+    active_provider: str
+    auto_fallback_to_ollama: bool
+    providers: dict[str, ProviderSettings]
+    keys_configured: dict[str, bool]
+
+
+class AISettingsUpdateRequest(BaseModel):
+    active_provider: str
+    auto_fallback_to_ollama: bool = True
+    providers: dict[str, ProviderSettings] = {}
+    api_key: Optional[str] = None
+    """If set, updates the in-memory key for `active_provider` for this
+    session (never persisted to disk by the agent itself)."""
