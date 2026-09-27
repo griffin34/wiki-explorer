@@ -22,7 +22,7 @@ from models.schemas import (
 )
 from services.changelog_service import ChangelogService, ChangelogEntry
 from services.chroma_service import ChromaService
-from services.ollama_service import OllamaService
+from services.llm_router import LLMRouter
 
 logger = logging.getLogger(__name__)
 
@@ -157,11 +157,11 @@ class EditAgent:
 
     def __init__(
         self,
-        ollama: OllamaService,
+        llm: LLMRouter,
         chroma: ChromaService,
         changelog: ChangelogService,
     ) -> None:
-        self._ollama = ollama
+        self._llm = llm
         self._chroma = chroma
         self._changelog = changelog
         # Store pending edit previews by edit_id
@@ -192,7 +192,7 @@ class EditAgent:
         prompt = _PARSE_INSTRUCTION_PROMPT.format(instruction=instruction)
         
         try:
-            response = await self._ollama.generate(prompt, system=_PARSE_INSTRUCTION_SYSTEM)
+            response = await self._llm.generate(prompt, system=_PARSE_INSTRUCTION_SYSTEM)
             # Extract JSON from response
             json_match = re.search(r'\{[\s\S]*\}', response)
             if not json_match:
@@ -229,7 +229,7 @@ class EditAgent:
         # 1. Semantic search via ChromaDB
         for term in search_terms[:3]:  # Limit to top 3 terms
             try:
-                query_embedding = await self._ollama.embed(term)
+                query_embedding = await self._llm.embed(term)
                 results = await self._chroma.query_chunks(
                     wiki_id,
                     query_embedding=query_embedding,
@@ -329,7 +329,7 @@ class EditAgent:
                     change_date=change_date,
                 )
                 
-                edited_content = await self._ollama.generate(
+                edited_content = await self._llm.generate(
                     prompt, system=_EDIT_PAGE_SYSTEM
                 )
                 
@@ -469,7 +469,7 @@ class EditAgent:
             try:
                 # Re-embed the page content
                 slug = change.page.replace(".md", "")
-                embedding = await self._ollama.embed(change.edited_content)
+                embedding = await self._llm.embed(change.edited_content)
                 
                 # Note: Full re-indexing would require more complex logic
                 # For now, we just log that embeddings should be updated
