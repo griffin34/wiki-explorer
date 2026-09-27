@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll } from 'vitest'
+import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from 'vitest'
 import request from 'supertest'
 import fs from 'fs'
 import path from 'path'
@@ -626,5 +626,95 @@ describe('findContentRoot — nested wiki structure', () => {
     const res = await request(app).get(`/api/wikis/${nestedId}/wiki`)
     expect(res.status).toBe(200)
     expect(Array.isArray(res.body)).toBe(true)
+  })
+})
+
+describe('AI settings proxy routes', () => {
+  let fetchMock: ReturnType<typeof vi.fn>
+
+  beforeEach(() => {
+    fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it('GET /api/ai/settings proxies to the agent', async () => {
+    fetchMock.mockResolvedValue({
+      status: 200,
+      json: async () => ({
+        active_provider: 'ollama',
+        auto_fallback_to_ollama: true,
+        providers: {},
+        keys_configured: { anthropic: false, openai: false, xai: false },
+      }),
+    })
+
+    const res = await request(app).get('/api/ai/settings')
+
+    expect(res.status).toBe(200)
+    expect(res.body.active_provider).toBe('ollama')
+    const [url, options] = fetchMock.mock.calls[0]
+    expect(url).toBe('http://localhost:8000/settings')
+    expect(options.method).toBeUndefined()
+  })
+
+  it('PUT /api/ai/settings proxies the body to the agent as a POST', async () => {
+    fetchMock.mockResolvedValue({
+      status: 200,
+      json: async () => ({
+        active_provider: 'anthropic',
+        auto_fallback_to_ollama: true,
+        providers: {},
+        keys_configured: { anthropic: true, openai: false, xai: false },
+      }),
+    })
+
+    const res = await request(app)
+      .put('/api/ai/settings')
+      .send({ active_provider: 'anthropic', auto_fallback_to_ollama: true, providers: {}, api_key: 'sk-test' })
+
+    expect(res.status).toBe(200)
+    const [url, options] = fetchMock.mock.calls[0]
+    expect(url).toBe('http://localhost:8000/settings')
+    expect(options.method).toBe('POST')
+    expect(JSON.parse(options.body)).toEqual({
+      active_provider: 'anthropic',
+      auto_fallback_to_ollama: true,
+      providers: {},
+      api_key: 'sk-test',
+    })
+  })
+
+  it('GET /api/ai/settings returns 503 when the agent is unreachable', async () => {
+    fetchMock.mockRejectedValue(new Error('connection refused'))
+
+    const res = await request(app).get('/api/ai/settings')
+
+    expect(res.status).toBe(503)
+    expect(res.body).toEqual({ error: 'Agent service not running' })
+  })
+
+  it('GET /api/ai/providers/:providerId/models proxies to the agent', async () => {
+    fetchMock.mockResolvedValue({
+      status: 200,
+      json: async () => ['claude-opus-5', 'claude-sonnet-5'],
+    })
+
+    const res = await request(app).get('/api/ai/providers/anthropic/models')
+
+    expect(res.status).toBe(200)
+    expect(res.body).toEqual(['claude-opus-5', 'claude-sonnet-5'])
+    expect(fetchMock.mock.calls[0][0]).toBe('http://localhost:8000/providers/anthropic/models')
+  })
+
+  it('GET /api/ai/providers/:providerId/models returns 503 when the agent is unreachable', async () => {
+    fetchMock.mockRejectedValue(new Error('connection refused'))
+
+    const res = await request(app).get('/api/ai/providers/anthropic/models')
+
+    expect(res.status).toBe(503)
   })
 })

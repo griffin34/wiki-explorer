@@ -1239,6 +1239,33 @@ app.get('/api/ai/edit/history', async (req, res) => {
   }
 })
 
+app.get('/api/ai/settings', async (_req, res) => {
+  try {
+    const r = await proxyToAgent('/settings')
+    res.status(r.status).json(await r.json())
+  } catch {
+    res.status(503).json({ error: 'Agent service not running' })
+  }
+})
+
+app.put('/api/ai/settings', async (req, res) => {
+  try {
+    const r = await proxyToAgent('/settings', { method: 'POST', body: JSON.stringify(req.body) })
+    res.status(r.status).json(await r.json())
+  } catch {
+    res.status(503).json({ error: 'Agent service not running' })
+  }
+})
+
+app.get('/api/ai/providers/:providerId/models', async (req, res) => {
+  try {
+    const r = await proxyToAgent(`/providers/${req.params.providerId}/models`)
+    res.status(r.status).json(await r.json())
+  } catch {
+    res.status(503).json({ error: 'Agent service not running' })
+  }
+})
+
 // ─── HTTP + WebSocket ─────────────────────────────────────────────────────────
 
 const httpServer = createServer(app)
