@@ -451,6 +451,17 @@ async def test_list_models_returns_ids():
     result = await svc.list_models()
 
     assert result == ["gpt-5", "gpt-5-mini"]
+
+
+@pytest.mark.asyncio
+async def test_list_models_maps_not_found_error_to_auth_config_error():
+    svc = OpenAICompatibleService(api_key="sk-test", base_url="https://api.openai.com/v1", model="gpt-5")
+    svc._client.models.list = AsyncMock(
+        side_effect=openai.NotFoundError(message="not found", response=MagicMock(status_code=404), body=None)
+    )
+
+    with pytest.raises(AuthConfigError):
+        await svc.list_models()
 ```
 
 - [ ] **Step 3: Run the tests to verify they fail**
@@ -503,7 +514,7 @@ class OpenAICompatibleService:
     async def list_models(self) -> list[str]:
         try:
             page = await self._client.models.list()
-        except (openai.AuthenticationError, openai.PermissionDeniedError) as exc:
+        except (openai.AuthenticationError, openai.PermissionDeniedError, openai.NotFoundError) as exc:
             raise AuthConfigError(str(exc)) from exc
         except (openai.RateLimitError, openai.APIConnectionError, openai.APIStatusError) as exc:
             raise TransientProviderError(str(exc)) from exc
@@ -513,7 +524,7 @@ class OpenAICompatibleService:
 - [ ] **Step 5: Run the tests to verify they pass**
 
 Run: `python -m pytest tests/test_openai_compatible.py -v`
-Expected: 5 passed
+Expected: 6 passed
 
 - [ ] **Step 6: Write the failing test for the provider registry**
 
