@@ -823,7 +823,10 @@ curl http://localhost:3001/api/ai/settings
 
 Updates AI provider settings. `api_key`, if present, sets the in-memory key
 for `active_provider` for the current process only (Electron persists it
-separately, encrypted, via IPC — see `docs/TECHNICAL.md`).
+separately, encrypted, via IPC — see `docs/TECHNICAL.md`). The `providers`
+dict is merged with previously-saved provider configurations — any provider
+not included in this request keeps its existing saved model, it is not
+removed.
 
 **Request Body:**
 ```json
@@ -837,7 +840,12 @@ separately, encrypted, via IPC — see `docs/TECHNICAL.md`).
 
 **Response:**
 ```json
-{ "ok": true }
+{
+  "active_provider": "anthropic",
+  "auto_fallback_to_ollama": true,
+  "providers": { "anthropic": { "model": "claude-sonnet-5" } },
+  "keys_configured": { "anthropic": true, "openai": false, "xai": false }
+}
 ```
 
 **curl:**
