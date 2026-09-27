@@ -63,6 +63,8 @@ interface AIServiceStatus {
   chroma: 'starting' | 'ready' | 'unavailable'
   agent: 'starting' | 'ready' | 'unavailable'
   overall: 'starting' | 'ready' | 'degraded' | 'unavailable'
+  activeProvider: string
+  providerConfigured: boolean
 }
 
 // Type declaration for the exposed API

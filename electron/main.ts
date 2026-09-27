@@ -31,12 +31,16 @@ interface AIServiceStatus {
   chroma: 'starting' | 'ready' | 'unavailable'
   agent: 'starting' | 'ready' | 'unavailable'
   overall: 'starting' | 'ready' | 'degraded' | 'unavailable'
+  activeProvider: string
+  providerConfigured: boolean
 }
 let aiStatus: AIServiceStatus = {
   ollama: 'starting',
-  chroma: 'starting', 
+  chroma: 'starting',
   agent: 'starting',
   overall: 'starting',
+  activeProvider: 'ollama',
+  providerConfigured: true,
 }
 
 /**
@@ -720,6 +724,20 @@ async function startAgentService(): Promise<void> {
   if (ready) {
     aiStatus.agent = 'ready'
     console.log('[Electron] Agent service ready')
+    try {
+      const settingsRes = await fetch(`http://localhost:${AGENT_PORT}/settings`)
+      if (settingsRes.ok) {
+        const data = await settingsRes.json() as {
+          active_provider: string
+          keys_configured: Record<string, boolean>
+        }
+        aiStatus.activeProvider = data.active_provider
+        aiStatus.providerConfigured =
+          data.active_provider === 'ollama' || !!data.keys_configured[data.active_provider]
+      }
+    } catch {
+      // Non-fatal — status just won't reflect the active provider this run.
+    }
   } else {
     aiStatus.agent = 'unavailable'
     console.warn('[Electron] Agent service failed to start')
