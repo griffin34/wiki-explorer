@@ -6,6 +6,8 @@ export interface WikiConfig {
   path: string
   color: string
   createdAt: string
+  /** 'wiki' = structured wiki folder (has wiki/ and raw/); 'folder' = plain markdown folder */
+  mode?: 'wiki' | 'folder'
   stats?: {
     pageCount: number
     sourceCount: number
@@ -95,6 +97,10 @@ export type WsEvent =
   | { event: 'file:add'; data: { path: string; wikiId: string } }
   | { event: 'file:change'; data: { path: string; wikiId: string } }
   | { event: 'file:remove'; data: { path: string; wikiId: string } }
+  | { event: 'ai:ingest:start'; data: { wikiId: string; file: string } }
+  | { event: 'ai:ingest:done'; data: { wikiId: string; file: string; chunks: number; wikiPage?: string } }
+  | { event: 'ai:ingest:error'; data: { wikiId: string; file: string; error: string } }
+  | { event: 'ai:wiki:created'; data: { wikiId: string; page: string; title: string } }
 
 export const PAGE_TYPE_COLORS: Record<string, string> = {
   overview: '#89b4fa',

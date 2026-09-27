@@ -1,5 +1,33 @@
+# Dependencies
 node_modules/
+
+# Build output
 dist/
-ui/dist/
+dist-agent/
+dist-server/
+coverage/
+app/
 *.tsbuildinfo
+
+# Electron compiled output (keep source .ts files)
+electron/*.js
+electron/*.js.map
+electron/*.cjs
+
+# Wiki data (local registry — paths are machine-specific)
+data/
+
+# macOS
 .DS_Store
+
+# Env / secrets
+.env
+.env.*
+# AI agent runtime
+.ai-logs/
+agents/.venv/
+__pycache__/
+
+# Local vector DB (ChromaDB persistence — machine-specific, derived from personal wiki content)
+chroma/
+agents/chroma/

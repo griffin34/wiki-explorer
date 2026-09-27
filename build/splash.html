@@ -1,0 +1,332 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Wiki Explorer</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    
+    body {
+      background: linear-gradient(135deg, #1e1e2e 0%, #11111b 100%);
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      font-family: -apple-system, BlinkMacSystemFont, 'Inter', sans-serif;
+      overflow: hidden;
+      -webkit-app-region: drag;
+    }
+    
+    .splash-container {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 32px;
+    }
+    
+    /* Book container */
+    .book-wrapper {
+      position: relative;
+      width: 120px;
+      height: 100px;
+      perspective: 800px;
+    }
+    
+    /* Book base */
+    .book {
+      position: relative;
+      width: 100%;
+      height: 100%;
+      transform-style: preserve-3d;
+    }
+    
+    /* Book spine/cover */
+    .book-cover {
+      position: absolute;
+      bottom: 0;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 90px;
+      height: 12px;
+      background: linear-gradient(90deg, #313244 0%, #45475a 50%, #313244 100%);
+      border-radius: 2px 2px 4px 4px;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+    }
+    
+    /* Left page */
+    .page-left {
+      position: absolute;
+      bottom: 12px;
+      left: 50%;
+      width: 52px;
+      height: 65px;
+      background: linear-gradient(135deg, #f5f5f5 0%, #e8e8e8 100%);
+      border-radius: 3px 0 0 3px;
+      transform-origin: right center;
+      transform: translateX(-100%) rotateY(-30deg);
+      box-shadow: -2px 2px 8px rgba(0, 0, 0, 0.15);
+      animation: pageLeft 2s ease-in-out infinite;
+    }
+    
+    .page-left::before {
+      content: '#';
+      position: absolute;
+      top: 12px;
+      left: 10px;
+      font-size: 16px;
+      font-weight: 600;
+      color: #45475a;
+    }
+    
+    .page-left::after {
+      content: '';
+      position: absolute;
+      top: 32px;
+      left: 8px;
+      right: 8px;
+      height: 4px;
+      background: #ccd0da;
+      border-radius: 2px;
+      box-shadow: 
+        0 8px 0 #ccd0da,
+        0 16px 0 #ccd0da;
+    }
+    
+    /* Right page */
+    .page-right {
+      position: absolute;
+      bottom: 12px;
+      left: 50%;
+      width: 52px;
+      height: 65px;
+      background: linear-gradient(225deg, #f5f5f5 0%, #e8e8e8 100%);
+      border-radius: 0 3px 3px 0;
+      transform-origin: left center;
+      transform: rotateY(30deg);
+      box-shadow: 2px 2px 8px rgba(0, 0, 0, 0.15);
+      animation: pageRight 2s ease-in-out infinite;
+    }
+    
+    .page-right::before {
+      content: '>_';
+      position: absolute;
+      top: 12px;
+      left: 10px;
+      font-size: 14px;
+      font-weight: 600;
+      font-family: monospace;
+      color: #45475a;
+    }
+    
+    .page-right::after {
+      content: '';
+      position: absolute;
+      top: 32px;
+      left: 8px;
+      right: 8px;
+      height: 4px;
+      background: #ccd0da;
+      border-radius: 2px;
+      box-shadow: 
+        0 8px 0 #ccd0da,
+        0 16px 0 #ccd0da;
+    }
+    
+    /* Flipping page */
+    .page-flip {
+      position: absolute;
+      bottom: 12px;
+      left: 50%;
+      width: 52px;
+      height: 65px;
+      background: linear-gradient(135deg, #fafafa 0%, #f0f0f0 100%);
+      border-radius: 0 3px 3px 0;
+      transform-origin: left center;
+      animation: pageFlip 2s ease-in-out infinite;
+      box-shadow: 2px 2px 10px rgba(0, 0, 0, 0.2);
+    }
+    
+    /* Neural network glow above book */
+    .neural-glow {
+      position: absolute;
+      top: -20px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 80px;
+      height: 50px;
+      background: radial-gradient(ellipse at center, 
+        rgba(137, 180, 250, 0.4) 0%, 
+        rgba(180, 190, 254, 0.2) 40%,
+        transparent 70%);
+      animation: glowPulse 2s ease-in-out infinite;
+      filter: blur(8px);
+    }
+    
+    /* Floating particles */
+    .particle {
+      position: absolute;
+      width: 4px;
+      height: 4px;
+      background: #89b4fa;
+      border-radius: 50%;
+      animation: float 3s ease-in-out infinite;
+    }
+    
+    .particle:nth-child(1) { left: 10px; top: 20px; animation-delay: 0s; }
+    .particle:nth-child(2) { right: 10px; top: 30px; animation-delay: 0.5s; background: #cba6f7; }
+    .particle:nth-child(3) { left: 20px; top: 0; animation-delay: 1s; }
+    .particle:nth-child(4) { right: 20px; top: 10px; animation-delay: 1.5s; background: #cba6f7; }
+    
+    @keyframes pageLeft {
+      0%, 100% { transform: translateX(-100%) rotateY(-30deg); }
+      50% { transform: translateX(-100%) rotateY(-20deg); }
+    }
+    
+    @keyframes pageRight {
+      0%, 100% { transform: rotateY(30deg); }
+      50% { transform: rotateY(20deg); }
+    }
+    
+    @keyframes pageFlip {
+      0%, 20% { 
+        transform: rotateY(30deg);
+        opacity: 0;
+      }
+      30% {
+        opacity: 1;
+      }
+      50% { 
+        transform: rotateY(-150deg);
+        opacity: 1;
+      }
+      70% {
+        opacity: 0;
+      }
+      100% { 
+        transform: rotateY(-150deg);
+        opacity: 0;
+      }
+    }
+    
+    @keyframes glowPulse {
+      0%, 100% { 
+        opacity: 0.6;
+        transform: translateX(-50%) scale(1);
+      }
+      50% { 
+        opacity: 1;
+        transform: translateX(-50%) scale(1.1);
+      }
+    }
+    
+    @keyframes float {
+      0%, 100% { 
+        transform: translateY(0) scale(1);
+        opacity: 0.6;
+      }
+      50% { 
+        transform: translateY(-10px) scale(1.2);
+        opacity: 1;
+      }
+    }
+    
+    /* Title */
+    .title {
+      color: #cdd6f4;
+      font-size: 24px;
+      font-weight: 600;
+      letter-spacing: 0.5px;
+    }
+    
+    /* Loading message */
+    .loading {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: #a6adc8;
+      font-size: 14px;
+    }
+    
+    .loading-dots {
+      display: flex;
+      gap: 4px;
+    }
+    
+    .loading-dots span {
+      width: 6px;
+      height: 6px;
+      background: #89b4fa;
+      border-radius: 50%;
+      animation: bounce 1.4s ease-in-out infinite;
+    }
+    
+    .loading-dots span:nth-child(1) { animation-delay: 0s; }
+    .loading-dots span:nth-child(2) { animation-delay: 0.2s; }
+    .loading-dots span:nth-child(3) { animation-delay: 0.4s; }
+    
+    @keyframes bounce {
+      0%, 80%, 100% { 
+        transform: scale(0.8);
+        opacity: 0.5;
+      }
+      40% { 
+        transform: scale(1.2);
+        opacity: 1;
+      }
+    }
+    
+    /* Status message */
+    #status {
+      color: #6c7086;
+      font-size: 12px;
+      margin-top: 8px;
+      min-height: 16px;
+    }
+  </style>
+</head>
+<body>
+  <div class="splash-container">
+    <div class="book-wrapper">
+      <div class="particle"></div>
+      <div class="particle"></div>
+      <div class="particle"></div>
+      <div class="particle"></div>
+      <div class="neural-glow"></div>
+      <div class="book">
+        <div class="page-left"></div>
+        <div class="page-right"></div>
+        <div class="page-flip"></div>
+        <div class="book-cover"></div>
+      </div>
+    </div>
+    
+    <div class="title">Wiki Explorer</div>
+    
+    <div class="loading">
+      <span>Loading</span>
+      <div class="loading-dots">
+        <span></span>
+        <span></span>
+        <span></span>
+      </div>
+    </div>
+    
+    <div id="status"></div>
+  </div>
+  
+  <script>
+    // Listen for status updates from main process
+    if (window.electronAPI) {
+      window.electronAPI.onStatus?.((status) => {
+        document.getElementById('status').textContent = status;
+      });
+    }
+  </script>
+</body>
+</html>

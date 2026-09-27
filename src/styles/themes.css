@@ -1,0 +1,118 @@
+/* ─── Catppuccin Mocha (default dark) ───────────────────────────────────────── */
+:root,
+[data-theme='catppuccin'] {
+  --bg-base:    #1e1e2e;
+  --bg-mantle:  #181825;
+  --bg-surface: #24273a;
+  --bg-elevated:#313244;
+  --bg-hover:   #45475a;
+
+  --text-primary:   #cdd6f4;
+  --text-secondary: #a6adc8;
+  --text-muted:     #6c7086;
+  --accent:         #89b4fa;
+  --success:        #a6e3a1;
+  --error:          #f38ba8;
+  --link:           #89dceb;
+
+  --border:       #313244;
+  --border-strong:#45475a;
+
+  /* Compound / opacity variants */
+  --accent-faint:        rgba(137, 180, 250, 0.10);
+  --accent-subtle:       rgba(137, 180, 250, 0.15);
+  --accent-moderate:     rgba(137, 180, 250, 0.20);
+  --success-faint:       rgba(166, 227, 161, 0.10);
+  --error-faint:         rgba(243, 139, 168, 0.10);
+  --surface-80:          rgba(36,  39,  58,  0.80);
+  --overlay:             rgba(30,  30,  46,  0.95);
+  --surface-half:        rgba(36,  39,  58,  0.50);
+  --accent-border:       rgba(137, 180, 250, 0.20);
+  --accent-border-strong:rgba(137, 180, 250, 0.50);
+  --success-border:      rgba(166, 227, 161, 0.20);
+  --error-border:        rgba(243, 139, 168, 0.20);
+  --border-subtle:       rgba(49,  50,  68,  0.50);
+}
+
+/* ─── Brand / Starbucks (light + dark-green shell) ───────────────────────────── */
+[data-theme='brand'] {
+  --bg-base:    #ffffff;
+  --bg-mantle:  #f9fafb;
+  --bg-surface: #f3f4f6;
+  --bg-elevated:#e5e7eb;
+  --bg-hover:   #f3f4f6;
+
+  --text-primary:   #111827;
+  --text-secondary: #374151;
+  --text-muted:     #6b7280;
+  --accent:         #00704a;
+  --success:        #166534;
+  --error:          #dc2626;
+  --link:           #00704a;
+
+  --border:       #e5e7eb;
+  --border-strong:#d1d5db;
+
+  --accent-faint:        rgba(0, 112, 74, 0.08);
+  --accent-subtle:       rgba(0, 112, 74, 0.12);
+  --accent-moderate:     rgba(0, 112, 74, 0.16);
+  --success-faint:       rgba(22, 101, 52, 0.08);
+  --error-faint:         rgba(220, 38, 38, 0.08);
+  --surface-80:          rgba(249, 250, 251, 0.80);
+  --overlay:             rgba(255, 255, 255, 0.95);
+  --surface-half:        rgba(243, 244, 246, 0.50);
+  --accent-border:       rgba(0, 112, 74, 0.20);
+  --accent-border-strong:rgba(0, 112, 74, 0.50);
+  --success-border:      rgba(22, 101, 52, 0.20);
+  --error-border:        rgba(220, 38, 38, 0.20);
+  --border-subtle:       rgba(229, 231, 235, 0.50);
+}
+
+/* ─── Sidebar context: dark green shell regardless of content theme ──────────── */
+[data-theme='brand'] .wiki-sidebar,
+[data-theme='brand'] .wiki-topbar,
+[data-theme='brand'] .wiki-header {
+  --bg-base:    #1e3932;
+  --bg-mantle:  #1e3932;
+  --bg-surface: rgba(255, 255, 255, 0.05);
+  --bg-elevated:rgba(255, 255, 255, 0.10);
+  --bg-hover:   rgba(255, 255, 255, 0.08);
+
+  --text-primary:   #ffffff;
+  --text-secondary: rgba(255, 255, 255, 0.80);
+  --text-muted:     rgba(255, 255, 255, 0.55);
+  --accent:         #4ade80;
+  --success:        #4ade80;
+  --error:          #fca5a5;
+  --link:           #86efac;
+
+  --border:       rgba(255, 255, 255, 0.12);
+  --border-strong:rgba(255, 255, 255, 0.22);
+
+  --accent-faint:        rgba(74, 222, 128, 0.15);
+  --accent-subtle:       rgba(74, 222, 128, 0.20);
+  --accent-moderate:     rgba(74, 222, 128, 0.25);
+  --success-faint:       rgba(74, 222, 128, 0.15);
+  --error-faint:         rgba(252, 165, 165, 0.15);
+  --accent-border:       rgba(74, 222, 128, 0.25);
+  --accent-border-strong:rgba(74, 222, 128, 0.50);
+  --success-border:      rgba(74, 222, 128, 0.25);
+  --error-border:        rgba(252, 165, 165, 0.25);
+  --border-subtle:       rgba(255, 255, 255, 0.08);
+}
+
+/* ─── Structural layout classes ──────────────────────────────────────────────── */
+.wiki-sidebar {
+  background-color: var(--bg-mantle);
+  color: var(--text-primary);
+}
+
+.wiki-topbar {
+  background-color: var(--bg-base);
+  color: var(--text-primary);
+}
+
+.wiki-header {
+  background-color: var(--bg-mantle);
+  color: var(--text-primary);
+}

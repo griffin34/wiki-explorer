@@ -15,9 +15,23 @@ body,
 }
 
 body {
-  background-color: #1e1e2e;
-  color: #cdd6f4;
+  background-color: var(--bg-base);
+  color: var(--text-primary);
   font-family: 'Inter', system-ui, sans-serif;
+}
+
+/* Electron window dragging */
+.wiki-topbar,
+.wiki-header {
+  -webkit-app-region: drag;
+}
+.wiki-topbar button,
+.wiki-topbar a,
+.wiki-topbar input,
+.wiki-header button,
+.wiki-header a,
+.wiki-header input {
+  -webkit-app-region: no-drag;
 }
 
 /* Scrollbars */
@@ -29,34 +43,34 @@ body {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: #313244;
+  background: var(--bg-elevated);
   border-radius: 3px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #45475a;
+  background: var(--bg-hover);
 }
 
 /* Wiki link styles in rendered markdown */
 .wiki-link {
-  color: #89dceb;
+  color: var(--link);
   text-decoration: none;
-  border-bottom: 1px solid rgba(137, 220, 235, 0.3);
+  border-bottom: 1px solid var(--accent-border);
   transition: border-color 0.15s;
 }
 .wiki-link:hover {
-  border-bottom-color: #89dceb;
+  border-bottom-color: var(--link);
 }
 .wiki-link-broken {
-  color: #f38ba8;
-  border-bottom-color: rgba(243, 139, 168, 0.3);
+  color: var(--error);
+  border-bottom-color: var(--error-border);
 }
 .wiki-link-broken:hover {
-  border-bottom-color: #f38ba8;
+  border-bottom-color: var(--error);
 }
 
 /* Markdown prose styles */
 .wiki-prose {
-  color: #cdd6f4;
+  color: var(--text-primary);
   line-height: 1.75;
   max-width: 72ch;
 }
@@ -64,23 +78,23 @@ body {
 .wiki-prose h1 {
   font-size: 1.875rem;
   font-weight: 600;
-  color: #cdd6f4;
+  color: var(--text-primary);
   margin: 0 0 1.5rem;
   padding-bottom: 0.5rem;
-  border-bottom: 1px solid #313244;
+  border-bottom: 1px solid var(--border);
 }
 
 .wiki-prose h2 {
   font-size: 1.375rem;
   font-weight: 600;
-  color: #cdd6f4;
+  color: var(--text-primary);
   margin: 2rem 0 0.75rem;
 }
 
 .wiki-prose h3 {
   font-size: 1.125rem;
   font-weight: 600;
-  color: #cdd6f4;
+  color: var(--text-primary);
   margin: 1.5rem 0 0.5rem;
 }
 
@@ -99,18 +113,18 @@ body {
 }
 
 .wiki-prose a {
-  color: #89dceb;
+  color: var(--link);
   text-decoration: none;
-  border-bottom: 1px solid rgba(137, 220, 235, 0.3);
+  border-bottom: 1px solid var(--accent-border);
 }
 
 .wiki-prose a:hover {
-  border-bottom-color: #89dceb;
+  border-bottom-color: var(--link);
 }
 
 .wiki-prose code {
-  background: #24273a;
-  color: #cba6f7;
+  background: var(--bg-surface);
+  color: var(--accent);
   padding: 0.125rem 0.375rem;
   border-radius: 4px;
   font-size: 0.875em;
@@ -118,8 +132,8 @@ body {
 }
 
 .wiki-prose pre {
-  background: #181825;
-  border: 1px solid #313244;
+  background: var(--bg-mantle);
+  border: 1px solid var(--border);
   border-radius: 8px;
   padding: 1rem;
   overflow-x: auto;
@@ -128,16 +142,16 @@ body {
 
 .wiki-prose pre code {
   background: transparent;
-  color: #cdd6f4;
+  color: var(--text-primary);
   padding: 0;
   font-size: 0.875rem;
 }
 
 .wiki-prose blockquote {
-  border-left: 3px solid #89b4fa;
+  border-left: 3px solid var(--accent);
   padding-left: 1rem;
   margin: 0 0 1rem;
-  color: #6c7086;
+  color: var(--text-secondary);
   font-style: italic;
 }
 
@@ -150,33 +164,54 @@ body {
 
 .wiki-prose th,
 .wiki-prose td {
-  border: 1px solid #313244;
+  border: 1px solid var(--border);
   padding: 0.5rem 0.75rem;
   text-align: left;
 }
 
 .wiki-prose th {
-  background: #24273a;
+  background: var(--bg-surface);
   font-weight: 600;
-  color: #89b4fa;
+  color: var(--accent);
 }
 
 .wiki-prose tr:nth-child(even) td {
-  background: rgba(36, 39, 58, 0.4);
+  background: var(--accent-faint);
 }
 
 .wiki-prose hr {
   border: none;
-  border-top: 1px solid #313244;
+  border-top: 1px solid var(--border);
   margin: 2rem 0;
 }
 
 .wiki-prose input[type='checkbox'] {
-  accent-color: #89b4fa;
+  accent-color: var(--accent);
   margin-right: 0.5rem;
 }
 
-/* Highlight.js theme tweaks */
+/* Highlight.js */
 .hljs {
   background: transparent !important;
+}
+
+/* Brand theme: lighten hljs tokens for readability on white bg */
+[data-theme='brand'] .hljs {
+  color: #24292e;
+}
+
+/* Toast slide-in animation */
+@keyframes slide-in {
+  from {
+    opacity: 0;
+    transform: translateX(100%);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.animate-slide-in {
+  animation: slide-in 0.3s ease-out forwards;
 }
