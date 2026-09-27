@@ -54,6 +54,74 @@ def test_post_settings_stores_key_and_configures_router(client, tmp_path):
     assert main._api_keys["anthropic"] == "sk-test-key"
 
 
+def test_post_settings_merges_providers_instead_of_replacing(client, tmp_path):
+    from models.schemas import AISettings, ProviderSettings
+
+    main.ai_settings_svc._file_path = tmp_path / "ai-settings.json"
+    main._api_keys.clear()
+    main.ai_settings_svc.save(
+        AISettings(
+            active_provider="anthropic",
+            auto_fallback_to_ollama=True,
+            providers={"anthropic": ProviderSettings(model="claude-sonnet-5")},
+        )
+    )
+
+    response = client.post(
+        "/settings",
+        json={
+            "active_provider": "openai",
+            "auto_fallback_to_ollama": True,
+            "providers": {"openai": {"model": "gpt-5"}},
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert set(body["providers"].keys()) == {"anthropic", "openai"}
+    assert body["providers"]["anthropic"]["model"] == "claude-sonnet-5"
+    assert body["providers"]["openai"]["model"] == "gpt-5"
+
+    # Confirm it was actually persisted to disk, not just echoed in the response.
+    persisted = main.ai_settings_svc.load()
+    assert persisted.providers["anthropic"].model == "claude-sonnet-5"
+    assert persisted.providers["openai"].model == "gpt-5"
+
+
+def test_post_settings_with_empty_providers_does_not_wipe_existing(client, tmp_path):
+    """Mirrors the frontend's "Fetch Models" call: it validates an API key by
+    posting providers={} without the user ever clicking Save. This must be a
+    no-op merge, not a wipe of previously configured providers."""
+    from models.schemas import AISettings, ProviderSettings
+
+    main.ai_settings_svc._file_path = tmp_path / "ai-settings.json"
+    main._api_keys.clear()
+    main.ai_settings_svc.save(
+        AISettings(
+            active_provider="anthropic",
+            auto_fallback_to_ollama=True,
+            providers={"anthropic": ProviderSettings(model="claude-sonnet-5")},
+        )
+    )
+
+    response = client.post(
+        "/settings",
+        json={
+            "active_provider": "anthropic",
+            "auto_fallback_to_ollama": True,
+            "providers": {},
+            "api_key": "sk-test-key",
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["providers"]["anthropic"]["model"] == "claude-sonnet-5"
+
+    persisted = main.ai_settings_svc.load()
+    assert persisted.providers["anthropic"].model == "claude-sonnet-5"
+
+
 def test_list_provider_models_requires_key(client):
     main._api_keys.pop("anthropic", None)
 

@@ -604,10 +604,13 @@ async def update_ai_settings(req: AISettingsUpdateRequest) -> AISettingsResponse
     if req.api_key:
         _api_keys[req.active_provider] = req.api_key
 
+    existing_settings = ai_settings_svc.load()
+    merged_providers = {**existing_settings.providers, **req.providers}
+
     new_settings = AISettings(
         active_provider=req.active_provider,
         auto_fallback_to_ollama=req.auto_fallback_to_ollama,
-        providers=req.providers,
+        providers=merged_providers,
     )
     ai_settings_svc.save(new_settings)
     _apply_ai_settings(new_settings)
