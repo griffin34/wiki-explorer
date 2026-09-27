@@ -67,6 +67,17 @@ async def test_generate_maps_rate_limit_to_transient():
 
 
 @pytest.mark.asyncio
+async def test_generate_maps_not_found_error_to_auth_config_error():
+    svc = OpenAICompatibleService(api_key="sk-test", base_url="https://api.openai.com/v1", model="gpt-5")
+    svc._client.chat.completions.create = AsyncMock(
+        side_effect=openai.NotFoundError(message="not found", response=MagicMock(status_code=404), body=None)
+    )
+
+    with pytest.raises(AuthConfigError):
+        await svc.generate("hi")
+
+
+@pytest.mark.asyncio
 async def test_list_models_returns_ids():
     svc = OpenAICompatibleService(api_key="sk-test", base_url="https://api.openai.com/v1", model="gpt-5")
     page = MagicMock()
