@@ -3,6 +3,7 @@ from __future__ import annotations
 from unittest.mock import AsyncMock, MagicMock
 
 import anthropic
+import httpx
 import pytest
 
 from services.llm_providers.anthropic_provider import AnthropicService
@@ -80,11 +81,74 @@ async def test_generate_maps_connection_error_to_transient():
         await svc.generate("hi")
 
 
-@pytest.mark.asyncio
-async def test_list_models_returns_ids():
+def _real_sdk_service(handler) -> AnthropicService:
+    """AnthropicService whose client is a REAL anthropic.AsyncAnthropic with
+    only the HTTP layer faked, so the SDK's real response parsing and
+    pagination objects are exercised (a shape-mocked `models.list` hid a
+    bug where the returned AsyncPage was iterated as a pydantic model)."""
     svc = AnthropicService(api_key="sk-test", model="claude-sonnet-5")
-    m1, m2 = MagicMock(id="claude-opus-5"), MagicMock(id="claude-sonnet-5")
-    svc._client.models.list = AsyncMock(return_value=[m1, m2])
+    svc._client = anthropic.AsyncAnthropic(
+        api_key="sk-test",
+        max_retries=0,
+        http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+    )
+    return svc
+
+
+def _model_info(model_id: str) -> dict:
+    return {
+        "id": model_id,
+        "type": "model",
+        "display_name": model_id,
+        "created_at": "2026-01-01T00:00:00Z",
+    }
+
+
+@pytest.mark.asyncio
+async def test_list_models_against_real_sdk_pagination():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/v1/models"
+        return httpx.Response(
+            200,
+            json={
+                "data": [_model_info("claude-opus-5"), _model_info("claude-sonnet-5")],
+                "has_more": False,
+                "first_id": "claude-opus-5",
+                "last_id": "claude-sonnet-5",
+            },
+        )
+
+    svc = _real_sdk_service(handler)
+
+    result = await svc.list_models()
+
+    assert result == ["claude-opus-5", "claude-sonnet-5"]
+
+
+@pytest.mark.asyncio
+async def test_list_models_follows_real_sdk_auto_pagination():
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.params.get("after_id") == "claude-opus-5":
+            return httpx.Response(
+                200,
+                json={
+                    "data": [_model_info("claude-sonnet-5")],
+                    "has_more": False,
+                    "first_id": "claude-sonnet-5",
+                    "last_id": "claude-sonnet-5",
+                },
+            )
+        return httpx.Response(
+            200,
+            json={
+                "data": [_model_info("claude-opus-5")],
+                "has_more": True,
+                "first_id": "claude-opus-5",
+                "last_id": "claude-opus-5",
+            },
+        )
+
+    svc = _real_sdk_service(handler)
 
     result = await svc.list_models()
 
@@ -93,12 +157,13 @@ async def test_list_models_returns_ids():
 
 @pytest.mark.asyncio
 async def test_list_models_maps_authentication_error():
-    svc = AnthropicService(api_key="sk-bad", model="claude-sonnet-5")
-    svc._client.models.list = AsyncMock(
-        side_effect=anthropic.AuthenticationError(
-            message="invalid x-api-key", response=MagicMock(status_code=401), body=None
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            401,
+            json={"type": "error", "error": {"type": "authentication_error", "message": "invalid x-api-key"}},
         )
-    )
+
+    svc = _real_sdk_service(handler)
 
     with pytest.raises(AuthConfigError):
         await svc.list_models()
@@ -106,12 +171,27 @@ async def test_list_models_maps_authentication_error():
 
 @pytest.mark.asyncio
 async def test_list_models_maps_not_found_error_to_auth_config_error():
-    svc = AnthropicService(api_key="sk-test", model="invalid-model")
-    svc._client.models.list = AsyncMock(
-        side_effect=anthropic.NotFoundError(
-            message="model not found", response=MagicMock(status_code=404), body=None
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            404,
+            json={"type": "error", "error": {"type": "not_found_error", "message": "not found"}},
         )
-    )
+
+    svc = _real_sdk_service(handler)
 
     with pytest.raises(AuthConfigError):
+        await svc.list_models()
+
+
+@pytest.mark.asyncio
+async def test_list_models_maps_rate_limit_error_to_transient():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            429,
+            json={"type": "error", "error": {"type": "rate_limit_error", "message": "slow down"}},
+        )
+
+    svc = _real_sdk_service(handler)
+
+    with pytest.raises(TransientProviderError):
         await svc.list_models()

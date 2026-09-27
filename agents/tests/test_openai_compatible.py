@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock
 
+import httpx
 import openai
 import pytest
 
@@ -98,3 +99,35 @@ async def test_list_models_maps_not_found_error_to_auth_config_error():
 
     with pytest.raises(AuthConfigError):
         await svc.list_models()
+
+
+@pytest.mark.asyncio
+async def test_list_models_against_real_sdk_page():
+    """Exercise the REAL openai.AsyncOpenAI client (only HTTP is faked) so the
+    SDK's actual page object and response parsing are covered, not a mock of
+    `models.list`'s return shape."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/v1/models"
+        return httpx.Response(
+            200,
+            json={
+                "object": "list",
+                "data": [
+                    {"id": "gpt-5", "object": "model", "created": 1767225600, "owned_by": "openai"},
+                    {"id": "gpt-5-mini", "object": "model", "created": 1767225600, "owned_by": "openai"},
+                ],
+            },
+        )
+
+    svc = OpenAICompatibleService(api_key="sk-test", base_url="https://api.openai.com/v1", model="gpt-5")
+    svc._client = openai.AsyncOpenAI(
+        api_key="sk-test",
+        base_url="https://api.openai.com/v1",
+        max_retries=0,
+        http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+    )
+
+    result = await svc.list_models()
+
+    assert result == ["gpt-5", "gpt-5-mini"]

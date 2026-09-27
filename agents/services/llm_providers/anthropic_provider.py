@@ -36,10 +36,12 @@ class AnthropicService:
         return ""
 
     async def list_models(self) -> list[str]:
+        # models.list() returns an AsyncPaginator; async-iterating it walks
+        # every page. (Awaiting it yields an AsyncPage, a pydantic model whose
+        # plain iteration yields (field, value) tuples, not models.)
         try:
-            models = await self._client.models.list()
+            return [m.id async for m in self._client.models.list()]
         except (anthropic.AuthenticationError, anthropic.PermissionDeniedError, anthropic.NotFoundError) as exc:
             raise AuthConfigError(str(exc)) from exc
         except (anthropic.RateLimitError, anthropic.APIConnectionError, anthropic.APIStatusError) as exc:
             raise TransientProviderError(str(exc)) from exc
-        return [m.id for m in models]
