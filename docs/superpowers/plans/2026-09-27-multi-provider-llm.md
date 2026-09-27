@@ -879,11 +879,13 @@ git commit -m "feat: add LLMRouter — the single generate()/embed() entry point
 - Test: `agents/tests/test_ai_settings_service.py`
 
 **Interfaces:**
-- Produces: `settings.ai_settings_file: Path`, `settings.anthropic_api_key: str | None`, `settings.openai_api_key: str | None`, `settings.xai_api_key: str | None` (on the existing `Settings` singleton); `ProviderSettings(BaseModel)` with `model: str`; `AISettings(BaseModel)` with `active_provider: str`, `auto_fallback_to_ollama: bool`, `providers: dict[str, ProviderSettings]`; `AISettingsService` with `load() -> AISettings` and `save(settings: AISettings) -> None`.
+- Produces: `settings.ai_settings_file: Path`, `settings.anthropic_api_key: Optional[str]`, `settings.openai_api_key: Optional[str]`, `settings.xai_api_key: Optional[str]` (on the existing `Settings` singleton); `ProviderSettings(BaseModel)` with `model: str`; `AISettings(BaseModel)` with `active_provider: str`, `auto_fallback_to_ollama: bool`, `providers: dict[str, ProviderSettings]`; `AISettingsService` with `load() -> AISettings` and `save(settings: AISettings) -> None`.
+
+**Note on `Optional[X]` vs. `X | None`:** use `Optional[X]` (from `typing`) for these new `Settings` fields, not the `X | None` syntax used elsewhere in this plan. `Settings` is a pydantic `BaseSettings` subclass, and pydantic v2 must `eval()` each field's annotation string to build its validator — even under `from __future__ import annotations`, which only defers *when* the string is parsed, not pydantic's need to resolve it into a real type. On Python 3.9 (confirmed to be this project's actual dev environment — `agents/.venv` is 3.9.6), evaluating the bare expression `str | None` raises `TypeError`, since `type.__or__` wasn't added until 3.10. This is exactly why every existing `Optional` field already in `agents/models/schemas.py` (predating this plan) uses `Optional[X]`, never `X | None` — follow that established, working convention for these fields.
 
 - [ ] **Step 1: Add new fields to `agents/config.py`**
 
-Modify `agents/config.py` — add after the existing `vaults_file` field/validator block (after line 34, before the `# Ingestion` comment):
+Modify `agents/config.py` — add `from typing import Optional` to the imports if not already present, then add after the existing `vaults_file` field/validator block (after line 34, before the `# Ingestion` comment):
 
 ```python
     # AI settings registry — non-secret provider/model choice, resolved like vaults_file
@@ -896,9 +898,9 @@ Modify `agents/config.py` — add after the existing `vaults_file` field/validat
 
     # Cloud LLM provider API keys — set via env/.env in dev, or injected by
     # Electron (from its encrypted store) when running the packaged app.
-    anthropic_api_key: str | None = None
-    openai_api_key: str | None = None
-    xai_api_key: str | None = None
+    anthropic_api_key: Optional[str] = None
+    openai_api_key: Optional[str] = None
+    xai_api_key: Optional[str] = None
 ```
 
 - [ ] **Step 2: Add the settings models to `agents/models/schemas.py`**
