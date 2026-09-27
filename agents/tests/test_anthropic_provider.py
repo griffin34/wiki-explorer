@@ -102,3 +102,16 @@ async def test_list_models_maps_authentication_error():
 
     with pytest.raises(AuthConfigError):
         await svc.list_models()
+
+
+@pytest.mark.asyncio
+async def test_list_models_maps_not_found_error_to_auth_config_error():
+    svc = AnthropicService(api_key="sk-test", model="invalid-model")
+    svc._client.models.list = AsyncMock(
+        side_effect=anthropic.NotFoundError(
+            message="model not found", response=MagicMock(status_code=404), body=None
+        )
+    )
+
+    with pytest.raises(AuthConfigError):
+        await svc.list_models()

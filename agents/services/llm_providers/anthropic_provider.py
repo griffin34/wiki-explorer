@@ -38,7 +38,7 @@ class AnthropicService:
     async def list_models(self) -> list[str]:
         try:
             models = await self._client.models.list()
-        except (anthropic.AuthenticationError, anthropic.PermissionDeniedError) as exc:
+        except (anthropic.AuthenticationError, anthropic.PermissionDeniedError, anthropic.NotFoundError) as exc:
             raise AuthConfigError(str(exc)) from exc
         except (anthropic.RateLimitError, anthropic.APIConnectionError, anthropic.APIStatusError) as exc:
             raise TransientProviderError(str(exc)) from exc
