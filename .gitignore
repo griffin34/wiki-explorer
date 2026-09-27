@@ -27,3 +27,7 @@ data/
 .ai-logs/
 agents/.venv/
 __pycache__/
+
+# Local vector DB (ChromaDB persistence — machine-specific, derived from personal wiki content)
+chroma/
+agents/chroma/

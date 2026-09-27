@@ -93,3 +93,76 @@ class WikiSetupCreateResponse(BaseModel):
     wiki_id: str
     wiki_path: str
     files_created: list[str]
+
+
+# Edit Agent models
+
+class EditHunk(BaseModel):
+    """A single hunk of changes in a page."""
+    line_start: int
+    line_end: int
+    before: str
+    after: str
+
+
+class PageChange(BaseModel):
+    """Changes to a single page."""
+    page: str  # e.g., "project-team.md"
+    revision: int
+    hunks: list[EditHunk]
+    original_content: Optional[str] = None  # Full content before edit
+    edited_content: Optional[str] = None  # Full content after edit
+
+
+class EditPreviewRequest(BaseModel):
+    """Request to preview an AI bulk edit."""
+    wiki_id: str
+    instruction: str
+
+
+class EditPreviewResponse(BaseModel):
+    """Response with proposed edit changes."""
+    edit_id: str
+    instruction: str
+    changes: list[PageChange]
+    affected_pages: list[str]
+    preview_diff: str
+
+
+class EditApplyRequest(BaseModel):
+    """Request to apply an approved edit."""
+    wiki_id: str
+    edit_id: str
+    selected_pages: Optional[list[str]] = None  # If None, apply all
+
+
+class EditApplyResponse(BaseModel):
+    """Response after applying edits."""
+    edit_id: str
+    applied_pages: list[str]
+    revision_count: int
+    changelog_recorded: bool
+
+
+class ManualEditRequest(BaseModel):
+    """Request to apply a manual edit to a single page."""
+    content: str
+    reason: Optional[str] = None
+
+
+class EditHistoryRequest(BaseModel):
+    """Request to get edit history."""
+    wiki_id: str
+    page: Optional[str] = None
+    limit: int = 50
+
+
+class ChangelogEntrySchema(BaseModel):
+    """Schema for a changelog entry."""
+    id: str
+    timestamp: str
+    type: str  # "ai_bulk" | "manual"
+    instruction: Optional[str]
+    changes: list[dict]
+    affected_pages: list[str]
+    user: str

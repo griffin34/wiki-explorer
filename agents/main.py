@@ -9,6 +9,7 @@ from pathlib import Path
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 
+from agents.edit import EditAgent
 from agents.ingestion import IngestionAgent
 from agents.search import SearchAgent
 from agents.wiki import WikiAgent
@@ -25,7 +26,13 @@ from models.schemas import (
     WikiSetupCreateRequest,
     WikiSetupCreateResponse,
     ProposedFolder,
+    EditPreviewRequest,
+    EditPreviewResponse,
+    EditApplyRequest,
+    EditApplyResponse,
+    ManualEditRequest,
 )
+from services.changelog_service import ChangelogService
 from services.chroma_service import ChromaService
 from services.markitdown_service import MarkItDownService
 from services.ollama_service import OllamaService
@@ -44,10 +51,12 @@ logger = logging.getLogger(__name__)
 ollama_svc = OllamaService()
 chroma_svc = ChromaService()
 markitdown_svc = MarkItDownService()
+changelog_svc = ChangelogService()
 
 ingestion_agent = IngestionAgent(ollama_svc, chroma_svc, markitdown_svc)
 wiki_agent = WikiAgent(ollama_svc, chroma_svc)
 search_agent = SearchAgent(ollama_svc, chroma_svc)
+edit_agent = EditAgent(ollama_svc, chroma_svc, changelog_svc)
 
 # Wire wiki_agent into ingestion_agent for auto-generation after ingest
 ingestion_agent.wiki_agent = wiki_agent
@@ -453,6 +462,73 @@ async def search_suggestions(
 ) -> list[str]:
     # Stub — can be implemented later
     return []
+
+
+# ---------------------------------------------------------------------------
+# Edit Agent
+# ---------------------------------------------------------------------------
+
+@app.post("/edit/preview", response_model=EditPreviewResponse)
+async def preview_edit(req: EditPreviewRequest) -> EditPreviewResponse:
+    """Preview an AI bulk edit based on a natural language instruction."""
+    try:
+        return await edit_agent.preview_edit(req.wiki_id, req.instruction)
+    except Exception as exc:
+        logger.error("Edit preview failed: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.post("/edit/apply", response_model=EditApplyResponse)
+async def apply_edit(req: EditApplyRequest) -> EditApplyResponse:
+    """Apply an approved edit from a preview."""
+    try:
+        return await edit_agent.apply_edit(
+            req.wiki_id,
+            req.edit_id,
+            req.selected_pages,
+        )
+    except RuntimeError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except Exception as exc:
+        logger.error("Edit apply failed: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.put("/wikis/{wiki_id}/pages/{page_slug}")
+async def manual_edit_page(
+    wiki_id: str,
+    page_slug: str,
+    req: ManualEditRequest,
+) -> EditApplyResponse:
+    """Apply a manual edit to a single page."""
+    try:
+        return await edit_agent.apply_manual_edit(
+            wiki_id,
+            page_slug,
+            req.content,
+            req.reason,
+        )
+    except RuntimeError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except Exception as exc:
+        logger.error("Manual edit failed: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.get("/edit/history")
+async def get_edit_history(
+    wiki_id: str = Query(...),
+    page: str = Query(default=None),
+    limit: int = Query(default=50),
+) -> list[dict]:
+    """Get edit history for a wiki or specific page."""
+    try:
+        return await edit_agent.get_edit_history(wiki_id, page, limit)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except Exception as exc:
+        logger.error("Get edit history failed: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc))
 
 
 # ---------------------------------------------------------------------------

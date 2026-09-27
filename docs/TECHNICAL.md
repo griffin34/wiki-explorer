@@ -82,7 +82,7 @@ wiki-explorer/
 │   ├── agents/               # Core agent implementations
 │   │   ├── ingestion.py      # Inbox watcher, file processing, ChromaDB indexing
 │   │   ├── search.py         # RAG-based semantic search
-│   │   └── wiki.py           # Wiki page generation from source docs
+│   │   └── wiki.py           # Wiki page + entity extraction
 │   ├── models/
 │   │   └── schemas.py        # Pydantic request/response models
 │   └── services/
@@ -413,11 +413,12 @@ async def search(self, wiki_id: str, query: str, top_k: int = 10) -> SearchRespo
     # 2. Query ChromaDB
     raw = await self._chroma.query_chunks(wiki_id, query_embedding, n_results=top_k)
     
-    # 3. Score and filter (threshold: 0.30)
-    # 4. Deduplicate (max 3 chunks per source file)
-    # 5. Build RAG prompt with top 5 excerpts
-    # 6. Generate answer via Ollama
-    # 7. Return answer + sources
+    # 3. Convert distance to score: score = 1.0 - distance
+    # 4. Filter by threshold (SEARCH_SCORE_THRESHOLD, default 0.35)
+    # 5. Deduplicate (max 3 chunks per source file)
+    # 6. Build RAG prompt with top 5 excerpts
+    # 7. Generate answer via Ollama
+    # 8. Return answer + sources
 ```
 
 **RAG Prompt Template:**
@@ -438,34 +439,81 @@ Answer concisely using Markdown formatting.
 
 ### WikiAgent (`agents/agents/wiki.py`)
 
-Generates wiki pages from processed source documents:
+Generates wiki pages from processed source documents with **automatic entity extraction**:
 
 **Page Generation Flow:**
 1. Fetch all chunks for source file from ChromaDB
 2. Sort chunks by `chunk_index`
 3. Build context up to `wiki_max_context_words` (6000)
-4. Generate page using LLM with strict format prompt
-5. Parse frontmatter (title, type, tags)
-6. Write to `wiki/` directory with slug filename
+4. **Extract entities** — identify people, technologies, projects, organizations, concepts
+5. Generate **source page** summarizing the document
+6. Generate **entity pages** for each extracted entity
+7. Write source page to `wiki/{slug}.md`
+8. Write entity pages to organized folders:
+   - `wiki/people/{slug}.md`
+   - `wiki/tech/{slug}.md`
+   - `wiki/projects/{slug}.md`
+   - `wiki/orgs/{slug}.md`
+   - `wiki/concepts/{slug}.md`
+9. Update `index.md` with new source page
 
-**Generated Page Format:**
+**Entity Extraction:**
+```python
+async def _extract_entities(self, context: str) -> list[ExtractedEntity]:
+    """Extract entities from document content using Ollama."""
+    # Returns list of {name, type, description, context}
+    # Types: person, technology, project, organization, concept
+```
+
+**Entity Page Update Logic:**
+- If entity page exists → add new source to Related section
+- If entity page doesn't exist → generate new page with LLM
+
+**Generated Source Page Format:**
 ```markdown
 ---
-title: <descriptive title>
-type: <concept|entity|overview|analysis|source>
-tags: [tag1, tag2, tag3]
+title: <document title>
+type: source
+tags: [source, <source_type>]
 sources: 1
-created: 2024-01-15
+created: 2026-07-27
 ---
 
 ## Summary
 <2-3 sentence summary>
 
-## Key Points
-<bullet points>
+## Key Information
+<bullet points of important facts>
 
-## Details
-<detailed content with [[WikiLink]] syntax>
+## People Mentioned
+<list with [[PersonName]] wiki links>
+
+## Technologies & Tools
+<list with [[TechName]] wiki links>
+
+## Related
+<list related topics with [[WikiLink]] syntax>
+```
+
+**Generated Entity Page Format:**
+```markdown
+---
+title: Kara Dave
+type: entity
+entity_type: person
+tags: [person]
+sources: 1
+created: 2026-07-27
+---
+
+## Overview
+<1-2 sentence description>
+
+## Role & Context
+<how this entity relates to the source document>
+
+## Related
+- [[source-page-slug]] — Source document
 ```
 
 ### Services
