@@ -8,6 +8,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from agents.edit import EditAgent
 from agents.ingestion import IngestionAgent
@@ -34,6 +35,7 @@ from models.schemas import (
     EditApplyRequest,
     EditApplyResponse,
     ManualEditRequest,
+    ProviderKeyRequest,
 )
 from services.ai_settings_service import AISettingsService
 from services.changelog_service import ChangelogService
@@ -140,6 +142,25 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# Provider errors raised by llm_router.generate() (bad/revoked key, provider
+# outage) become actionable HTTP errors instead of generic 500s — which
+# Express would otherwise surface as "Agent service not running".
+@app.exception_handler(AuthConfigError)
+async def auth_config_error_handler(request, exc: AuthConfigError):
+    return JSONResponse(
+        status_code=401,
+        content={"detail": f"AI provider authentication failed: {exc}. Check your API key in AI Provider Settings."},
+    )
+
+
+@app.exception_handler(TransientProviderError)
+async def transient_provider_error_handler(request, exc: TransientProviderError):
+    return JSONResponse(
+        status_code=503,
+        content={"detail": f"AI provider temporarily unavailable: {exc}"},
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -523,6 +544,8 @@ async def preview_edit(req: EditPreviewRequest) -> EditPreviewResponse:
     """Preview an AI bulk edit based on a natural language instruction."""
     try:
         return await edit_agent.preview_edit(req.wiki_id, req.instruction)
+    except (AuthConfigError, TransientProviderError):
+        raise  # handled by the global provider-error handlers
     except Exception as exc:
         logger.error("Edit preview failed: %s", exc)
         raise HTTPException(status_code=500, detail=str(exc))
@@ -539,6 +562,8 @@ async def apply_edit(req: EditApplyRequest) -> EditApplyResponse:
         )
     except RuntimeError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
+    except (AuthConfigError, TransientProviderError):
+        raise  # handled by the global provider-error handlers
     except Exception as exc:
         logger.error("Edit apply failed: %s", exc)
         raise HTTPException(status_code=500, detail=str(exc))
@@ -560,6 +585,8 @@ async def manual_edit_page(
         )
     except RuntimeError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
+    except (AuthConfigError, TransientProviderError):
+        raise  # handled by the global provider-error handlers
     except Exception as exc:
         logger.error("Manual edit failed: %s", exc)
         raise HTTPException(status_code=500, detail=str(exc))
@@ -621,6 +648,22 @@ async def update_ai_settings(req: AISettingsUpdateRequest) -> AISettingsResponse
         providers=new_settings.providers,
         keys_configured={pid: pid in _api_keys for pid in PROVIDER_SPECS if pid != "ollama"},
     )
+
+
+@app.post("/providers/{provider_id}/key")
+async def set_provider_key(provider_id: str, req: ProviderKeyRequest) -> dict:
+    """Stage an API key in memory so /providers/{id}/models can validate it.
+
+    Deliberately does NOT persist settings, change active_provider, or
+    reconfigure llm_router: a provider may only become active via POST
+    /settings (Save), after its key has passed a list_models() call.
+    """
+    if provider_id not in PROVIDER_SPECS:
+        raise HTTPException(status_code=404, detail=f"Unknown provider: {provider_id!r}")
+    if provider_id == "ollama":
+        raise HTTPException(status_code=400, detail="Ollama does not use an API key")
+    _api_keys[provider_id] = req.api_key
+    return {"ok": True}
 
 
 @app.get("/providers/{provider_id}/models")

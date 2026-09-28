@@ -195,3 +195,10 @@ class AISettingsUpdateRequest(BaseModel):
     api_key: Optional[str] = None
     """If set, updates the in-memory key for `active_provider` for this
     session (never persisted to disk by the agent itself)."""
+
+
+class ProviderKeyRequest(BaseModel):
+    """Stages an API key for a cloud provider in this session so its model
+    list can be fetched (i.e. the key validated) without committing to that
+    provider. Never changes active_provider or persisted settings."""
+    api_key: str
