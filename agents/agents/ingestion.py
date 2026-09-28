@@ -13,8 +13,8 @@ import httpx
 from config import settings
 from models.schemas import WikiConfig
 from services.chroma_service import ChromaService
+from services.llm_router import LLMRouter
 from services.markitdown_service import MarkItDownService
-from services.ollama_service import OllamaService
 
 if TYPE_CHECKING:
     from agents.wiki import WikiAgent
@@ -93,11 +93,11 @@ def chunk_text(text: str, chunk_size: int = 512, overlap: int = 64, max_chunk_ch
 class IngestionAgent:
     def __init__(
         self,
-        ollama: OllamaService,
+        llm: LLMRouter,
         chroma: ChromaService,
         markitdown: MarkItDownService,
     ) -> None:
-        self._ollama = ollama
+        self._llm = llm
         self._chroma = chroma
         self._markitdown = markitdown
         self._watchers: dict[str, asyncio.Task] = {}  # wiki_id → watcher task
@@ -419,7 +419,7 @@ class IngestionAgent:
             # 4. Embed each chunk
             embeddings: list[list[float]] = []
             for chunk in chunks:
-                embedding = await self._ollama.embed(chunk)
+                embedding = await self._llm.embed(chunk)
                 embeddings.append(embedding)
 
             # 5. Compute destination path so we can store the final relative path

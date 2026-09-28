@@ -1,4 +1,4 @@
-import { app, BrowserWindow, shell, Menu, dialog, ipcMain } from 'electron'
+import { app, BrowserWindow, shell, Menu, dialog, ipcMain, safeStorage } from 'electron'
 import path from 'path'
 import { fileURLToPath } from 'url'
 import { spawn, ChildProcess, execSync } from 'child_process'
@@ -31,12 +31,16 @@ interface AIServiceStatus {
   chroma: 'starting' | 'ready' | 'unavailable'
   agent: 'starting' | 'ready' | 'unavailable'
   overall: 'starting' | 'ready' | 'degraded' | 'unavailable'
+  activeProvider: string
+  providerConfigured: boolean
 }
 let aiStatus: AIServiceStatus = {
   ollama: 'starting',
-  chroma: 'starting', 
+  chroma: 'starting',
   agent: 'starting',
   overall: 'starting',
+  activeProvider: 'ollama',
+  providerConfigured: true,
 }
 
 /**
@@ -126,6 +130,71 @@ function ensureUserData(): void {
   
   if (!fs.existsSync(vaultsFile)) {
     fs.writeFileSync(vaultsFile, JSON.stringify({ vaults: [] }, null, 2))
+  }
+}
+
+/**
+ * Path to the encrypted provider-API-key store. Lives in Electron's own
+ * userData dir regardless of dev/prod — this is Electron-only bookkeeping,
+ * never read directly by the Python agent (which only ever sees a decrypted
+ * key via env var or POST /settings).
+ */
+function getSecretsFilePath(): string {
+  return path.join(app.getPath('userData'), 'data', '.secrets.enc')
+}
+
+/** provider id -> base64-encoded encrypted API key */
+function loadEncryptedKeys(): Record<string, string> {
+  const filePath = getSecretsFilePath()
+  if (!fs.existsSync(filePath)) return {}
+  try {
+    return JSON.parse(fs.readFileSync(filePath, 'utf-8'))
+  } catch {
+    return {}
+  }
+}
+
+function saveProviderKeyEncrypted(providerId: string, apiKey: string): void {
+  const filePath = getSecretsFilePath()
+  fs.mkdirSync(path.dirname(filePath), { recursive: true })
+  const keys = loadEncryptedKeys()
+  keys[providerId] = safeStorage.encryptString(apiKey).toString('base64')
+  fs.writeFileSync(filePath, JSON.stringify(keys, null, 2))
+}
+
+function decryptProviderKey(providerId: string): string | null {
+  const keys = loadEncryptedKeys()
+  const encoded = keys[providerId]
+  if (!encoded) return null
+  try {
+    return safeStorage.decryptString(Buffer.from(encoded, 'base64'))
+  } catch (err) {
+    console.error(`[Electron] Failed to decrypt key for ${providerId}:`, err)
+    return null
+  }
+}
+
+/** Provider ids that currently have a decryptable key stored. */
+function getConfiguredProviderIds(): string[] {
+  return Object.keys(loadEncryptedKeys()).filter((id) => decryptProviderKey(id) !== null)
+}
+
+const AGENT_ENV_VAR_BY_PROVIDER: Record<string, string> = {
+  anthropic: 'ANTHROPIC_API_KEY',
+  openai: 'OPENAI_API_KEY',
+  xai: 'XAI_API_KEY',
+}
+
+/** Push a freshly-saved key into the already-running agent process without a restart. */
+async function pushProviderKeyToAgent(providerId: string, apiKey: string): Promise<void> {
+  try {
+    await fetch(`http://localhost:${AGENT_PORT}/providers/${providerId}/key`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ api_key: apiKey }),
+    })
+  } catch (err) {
+    console.warn('[Electron] Could not push provider key to agent (it may not be running yet):', err)
   }
 }
 
@@ -610,17 +679,26 @@ async function startAgentService(): Promise<void> {
   }
 
   // Set up environment variables
-  const agentEnv: NodeJS.ProcessEnv = { 
+  const agentEnv: NodeJS.ProcessEnv = {
     ...process.env,
     PYTHONUNBUFFERED: '1',
   }
-  
+
+  // Restore any previously-saved provider keys (decrypted in-memory only,
+  // never written back to a plaintext file by this process).
+  for (const providerId of getConfiguredProviderIds()) {
+    const key = decryptProviderKey(providerId)
+    const envVar = AGENT_ENV_VAR_BY_PROVIDER[providerId]
+    if (key && envVar) agentEnv[envVar] = key
+  }
+
   // Production: use embedded ChromaDB mode
   if (!isDev) {
     const userDataDir = getUserDataDir()
     agentEnv.CHROMA_EMBEDDED = 'true'
     agentEnv.CHROMA_PATH = path.join(userDataDir, 'chroma')
     agentEnv.VAULTS_FILE = path.join(userDataDir, 'vaults.json')
+    agentEnv.AI_SETTINGS_FILE = path.join(userDataDir, 'ai-settings.json')
   }
 
   console.log('[Electron] Starting agent service:', agentCommand)
@@ -642,6 +720,20 @@ async function startAgentService(): Promise<void> {
   if (ready) {
     aiStatus.agent = 'ready'
     console.log('[Electron] Agent service ready')
+    try {
+      const settingsRes = await fetch(`http://localhost:${AGENT_PORT}/settings`)
+      if (settingsRes.ok) {
+        const data = await settingsRes.json() as {
+          active_provider: string
+          keys_configured: Record<string, boolean>
+        }
+        aiStatus.activeProvider = data.active_provider
+        aiStatus.providerConfigured =
+          data.active_provider === 'ollama' || !!data.keys_configured[data.active_provider]
+      }
+    } catch {
+      // Non-fatal — status just won't reflect the active provider this run.
+    }
   } else {
     aiStatus.agent = 'unavailable'
     console.warn('[Electron] Agent service failed to start')
@@ -979,7 +1071,17 @@ app.whenReady().then(async () => {
   
   // IPC handler for frontend to get AI service status
   ipcMain.handle('get-ai-status', () => aiStatus)
-  
+
+  // IPC handler to save a provider's API key (encrypted at rest) and push it
+  // live to the running agent process
+  ipcMain.handle('save-provider-key', async (_event, providerId: string, apiKey: string) => {
+    saveProviderKeyEncrypted(providerId, apiKey)
+    await pushProviderKeyToAgent(providerId, apiKey)
+  })
+
+  // IPC handler to list which providers currently have a key configured
+  ipcMain.handle('get-configured-providers', () => getConfiguredProviderIds())
+
   // IPC handler to open inbox folder in Finder (for Outlook drag workaround)
   ipcMain.handle('open-inbox-folder', async (_event, wikiPath: string) => {
     // Try to find the content root and inbox

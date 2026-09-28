@@ -798,6 +798,89 @@ Webhook for agent service to send real-time notifications (broadcasts to WebSock
 
 ---
 
+#### GET /api/ai/settings
+
+Returns the current AI provider settings.
+
+**Response:**
+```json
+{
+  "active_provider": "anthropic",
+  "auto_fallback_to_ollama": true,
+  "providers": { "anthropic": { "model": "claude-sonnet-5" } },
+  "keys_configured": { "anthropic": true, "openai": false, "xai": false }
+}
+```
+
+**curl:**
+```bash
+curl http://localhost:3001/api/ai/settings
+```
+
+---
+
+#### PUT /api/ai/settings
+
+Updates AI provider settings. `api_key`, if present, sets the in-memory key
+for `active_provider` for the current process only (Electron persists it
+separately, encrypted, via IPC — see `docs/TECHNICAL.md`). The `providers`
+dict is merged with previously-saved provider configurations — any provider
+not included in this request keeps its existing saved model, it is not
+removed.
+
+**Request Body:**
+```json
+{
+  "active_provider": "anthropic",
+  "auto_fallback_to_ollama": true,
+  "providers": { "anthropic": { "model": "claude-sonnet-5" } },
+  "api_key": "sk-ant-..."
+}
+```
+
+**Response:**
+```json
+{
+  "active_provider": "anthropic",
+  "auto_fallback_to_ollama": true,
+  "providers": { "anthropic": { "model": "claude-sonnet-5" } },
+  "keys_configured": { "anthropic": true, "openai": false, "xai": false }
+}
+```
+
+**curl:**
+```bash
+curl -X PUT http://localhost:3001/api/ai/settings \
+  -H "Content-Type: application/json" \
+  -d '{"active_provider": "anthropic", "api_key": "sk-ant-..."}'
+```
+
+---
+
+#### GET /api/ai/providers/:providerId/models
+
+Fetches the live list of available models for a cloud provider
+(`anthropic`, `openai`, or `xai`), using whichever key is currently set
+for it. Returns `400` if no key is set for that provider, `401` if the key
+is rejected, `503` if the provider is transiently unreachable.
+
+**Parameters:**
+| Name | In | Description |
+|------|-----|-------------|
+| `providerId` | path | Provider ID: `anthropic`, `openai`, or `xai` |
+
+**Response:**
+```json
+["claude-opus-5", "claude-sonnet-5", "claude-haiku-4-5"]
+```
+
+**curl:**
+```bash
+curl http://localhost:3001/api/ai/providers/anthropic/models
+```
+
+---
+
 ## Python Agent Service (Port 8000)
 
 Base URL: `http://localhost:8000`

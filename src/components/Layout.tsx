@@ -1,9 +1,11 @@
 import { useState, useCallback, useEffect } from 'react'
 import { Outlet, useParams, useNavigate } from 'react-router-dom'
 import { PanelLeftClose, PanelLeftOpen, ChevronLeft, Moon, Wand2 } from 'lucide-react'
+import { Settings } from 'lucide-react'
 import SirenIcon from './SirenIcon'
 import Sidebar from './Sidebar'
 import AIEditPanel from './AIEditPanel'
+import AISettingsPanel from './AISettingsPanel'
 import { usePageList, useWikis, useWikiSocket } from '../hooks/useWiki'
 import { useTheme } from '../ThemeContext'
 import type { WsEvent } from '../types'
@@ -16,6 +18,7 @@ export default function Layout() {
   const [isResizing, setIsResizing] = useState(false)
   const [refreshToken, setRefreshToken] = useState(0)
   const [aiEditPanelOpen, setAiEditPanelOpen] = useState(false)
+  const [aiSettingsPanelOpen, setAiSettingsPanelOpen] = useState(false)
   const { theme, toggleTheme } = useTheme()
 
   const { pages, reload: reloadPages } = usePageList(wikiId)
@@ -126,6 +129,14 @@ export default function Layout() {
           </button>
 
           <button
+            onClick={() => setAiSettingsPanelOpen(true)}
+            className="p-1.5 rounded hover:bg-[var(--bg-elevated)] text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
+            title="AI Provider Settings"
+          >
+            <Settings size={15} />
+          </button>
+
+          <button
             onClick={toggleTheme}
             className="p-1.5 rounded hover:bg-[var(--bg-elevated)] text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors"
             title={theme === 'brand' ? 'Switch to dark theme' : 'Switch to brand theme'}
@@ -149,6 +160,8 @@ export default function Layout() {
           reloadPages()
         }}
       />
+
+      <AISettingsPanel isOpen={aiSettingsPanelOpen} onClose={() => setAiSettingsPanelOpen(false)} />
     </div>
   )
 }

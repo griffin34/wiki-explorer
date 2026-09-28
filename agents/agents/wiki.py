@@ -14,7 +14,7 @@ from agents.ingestion import find_content_root
 from config import settings
 from models.schemas import WikiConfig
 from services.chroma_service import ChromaService
-from services.ollama_service import OllamaService
+from services.llm_router import LLMRouter
 
 logger = logging.getLogger(__name__)
 
@@ -163,8 +163,8 @@ created: {today}
 
 
 class WikiAgent:
-    def __init__(self, ollama: OllamaService, chroma: ChromaService) -> None:
-        self._ollama = ollama
+    def __init__(self, llm: LLMRouter, chroma: ChromaService) -> None:
+        self._llm = llm
         self._chroma = chroma
         self._queue: asyncio.Queue = asyncio.Queue()
         self._processor_task: asyncio.Task | None = None
@@ -354,7 +354,7 @@ class WikiAgent:
         prompt = _ENTITY_EXTRACTION_PROMPT.format(context=context[:8000])  # Limit context size
         
         try:
-            response = await self._ollama.generate(prompt, system=_ENTITY_EXTRACTION_SYSTEM)
+            response = await self._llm.generate(prompt, system=_ENTITY_EXTRACTION_SYSTEM)
             
             # Clean up response - remove markdown fences if present
             cleaned = response.strip()
@@ -404,8 +404,8 @@ class WikiAgent:
             today=today,
         )
         
-        response = await self._ollama.generate(prompt, system=_WIKI_PAGE_SYSTEM)
-        
+        response = await self._llm.generate(prompt, system=_WIKI_PAGE_SYSTEM)
+
         # Parse frontmatter for title
         frontmatter = _extract_frontmatter(response)
         title: str = str(frontmatter.get("title") or source_title)
@@ -485,8 +485,8 @@ class WikiAgent:
             today=today,
         )
         
-        response = await self._ollama.generate(prompt, system=_WIKI_PAGE_SYSTEM)
-        
+        response = await self._llm.generate(prompt, system=_WIKI_PAGE_SYSTEM)
+
         await asyncio.to_thread(entity_file.write_text, response, "utf-8")
         logger.info("Wrote entity page %s", entity_file)
         

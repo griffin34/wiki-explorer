@@ -316,6 +316,39 @@ To manually re-index a wiki:
 
 ---
 
+## AI Provider Settings
+
+Wiki Explorer can use Ollama (free, fully local) or your own subscription
+to Claude, OpenAI, or xAI (Grok) for search answers, wiki page generation,
+and AI-assisted editing. Embeddings (what powers semantic search) always
+run locally via Ollama, regardless of which provider you pick.
+
+To switch providers, click the gear icon in the top bar to open **AI
+Provider Settings**:
+
+1. Pick a provider from the dropdown.
+2. Paste your API key and click **Fetch models** — this validates the key
+   and populates the model list with that provider's current models.
+3. Pick a model and click **Save**.
+
+If you don't have a subscription to any of these, leave the provider set
+to **Ollama (local)** — nothing to configure, it's the default.
+
+**Automatic fallback:** with the "Fall back to Ollama automatically"
+checkbox on (the default), a temporary problem with your cloud provider
+(rate limit, outage) is retried against Ollama automatically, with a
+toast notification. A bad or expired API key is never silently retried —
+you'll see a clear error so you can fix it in Settings.
+
+**Running without the desktop app:** if you're running Wiki Explorer via
+`scripts/start-ai.sh` instead of the packaged Electron app, the Settings
+panel still works for your current session, but won't remember your key
+across a restart — set `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, or
+`XAI_API_KEY` in `agents/.env` instead, the same way you'd set
+`OLLAMA_BASE_URL`.
+
+---
+
 ## Folder Mode
 
 For simple markdown folders without the full wiki structure:

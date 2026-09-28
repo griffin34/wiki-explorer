@@ -7,7 +7,7 @@ from collections import defaultdict
 from config import settings
 from models.schemas import SearchResponse, SearchSource
 from services.chroma_service import ChromaService
-from services.ollama_service import OllamaService
+from services.llm_router import LLMRouter
 
 logger = logging.getLogger(__name__)
 
@@ -28,8 +28,8 @@ _NO_RESULTS_ANSWER = "I don't have enough information to answer that question."
 
 
 class SearchAgent:
-    def __init__(self, ollama: OllamaService, chroma: ChromaService) -> None:
-        self._ollama = ollama
+    def __init__(self, llm: LLMRouter, chroma: ChromaService) -> None:
+        self._llm = llm
         self._chroma = chroma
 
     async def search(
@@ -38,7 +38,7 @@ class SearchAgent:
         start_ms = time.monotonic()
 
         # 1. Embed the query
-        query_embedding = await self._ollama.embed(query)
+        query_embedding = await self._llm.embed(query)
 
         # 2. Query ChromaDB
         raw = await self._chroma.query_chunks(
@@ -107,7 +107,7 @@ class SearchAgent:
         prompt = _RAG_PROMPT_TEMPLATE.format(query=query, numbered_excerpts=excerpts)
 
         # 9. Generate answer
-        answer = await self._ollama.generate(prompt)
+        answer = await self._llm.generate(prompt)
 
         # 10. Build SearchSource list
         sources: list[SearchSource] = []

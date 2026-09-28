@@ -327,7 +327,7 @@ class TestFrontmatterValidation:
         
         # For testing, we'll directly test the generation output
         generated = await _mock_generate_page(
-            wiki_agent._ollama,
+            wiki_agent._llm,
             indexed_pdf_content,
             "Q1 2026 Financial Report",
             "pdf",
