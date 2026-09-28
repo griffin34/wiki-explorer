@@ -40,6 +40,10 @@ mac:
   gatekeeperAssess: false
   entitlements: build/entitlements.mac.plist
   entitlementsInherit: build/entitlements.mac.plist
+  # Signing uses CSC_LINK/CSC_KEY_PASSWORD (env vars, set as GitHub Actions
+  # secrets in CI). Notarization runs automatically after signing when
+  # APPLE_ID/APPLE_APP_SPECIFIC_PASSWORD/APPLE_TEAM_ID are present.
+  notarize: true
 
 dmg:
   artifactName: "${productName}-${version}-${arch}.${ext}"
