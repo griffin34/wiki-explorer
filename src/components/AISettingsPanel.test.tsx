@@ -145,6 +145,20 @@ test('shows an error when fetching models fails (invalid key)', async () => {
   })
 })
 
+test('shows an error instead of crashing when GET /api/ai/settings is not ok', async () => {
+  global.fetch = vi.fn().mockImplementation((url: string) => {
+    if (url.includes('/api/ai/settings')) {
+      return Promise.resolve({ ok: false, status: 503, json: async () => ({ error: 'Agent service not running' }) } as Response)
+    }
+    return Promise.reject(new Error(`unexpected fetch: ${url}`))
+  })
+  render(<AISettingsPanel isOpen={true} onClose={() => {}} />)
+
+  await waitFor(() => {
+    expect(screen.getByText(/could not load ai settings/i)).toBeInTheDocument()
+  })
+})
+
 test('save is disabled for a cloud provider until models have been fetched', async () => {
   render(<AISettingsPanel isOpen={true} onClose={() => {}} />)
   await waitFor(() => screen.getByLabelText(/provider/i))

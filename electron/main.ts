@@ -698,6 +698,7 @@ async function startAgentService(): Promise<void> {
     agentEnv.CHROMA_EMBEDDED = 'true'
     agentEnv.CHROMA_PATH = path.join(userDataDir, 'chroma')
     agentEnv.VAULTS_FILE = path.join(userDataDir, 'vaults.json')
+    agentEnv.AI_SETTINGS_FILE = path.join(userDataDir, 'ai-settings.json')
   }
 
   console.log('[Electron] Starting agent service:', agentCommand)

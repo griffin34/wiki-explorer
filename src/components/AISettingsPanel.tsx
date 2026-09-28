@@ -41,6 +41,10 @@ export default function AISettingsPanel({ isOpen, onClose }: AISettingsPanelProp
     setLoading(true)
     try {
       const res = await fetch(api('/api/ai/settings'))
+      if (!res.ok) {
+        setError('Could not load AI settings — is the server running?')
+        return
+      }
       const data: AISettingsResponse = await res.json()
       setActiveProvider(data.active_provider)
       setAutoFallback(data.auto_fallback_to_ollama)
