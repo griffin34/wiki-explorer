@@ -76,17 +76,14 @@ export default function AISettingsPanel({ isOpen, onClose }: AISettingsPanelProp
       if (window.electronAPI?.isElectron) {
         await window.electronAPI.saveProviderKey(activeProvider, apiKey)
       }
-      // Send the key to the (possibly non-Electron) running agent for this
-      // session so model-listing can use it even without Electron.
-      await fetch(api('/api/ai/settings'), {
+      // Stage the key in the (possibly non-Electron) running agent for this
+      // session so model-listing can use it even without Electron. This
+      // deliberately does NOT touch persisted settings or active_provider —
+      // that only happens when the user clicks Save.
+      await fetch(api(`/api/ai/providers/${activeProvider}/key`), {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          active_provider: activeProvider,
-          auto_fallback_to_ollama: autoFallback,
-          providers: {},
-          api_key: apiKey,
-        }),
+        body: JSON.stringify({ api_key: apiKey }),
       })
       const res = await fetch(api(`/api/ai/providers/${activeProvider}/models`))
       if (!res.ok) {

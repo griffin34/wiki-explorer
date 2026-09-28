@@ -717,4 +717,33 @@ describe('AI settings proxy routes', () => {
 
     expect(res.status).toBe(503)
   })
+
+  it('PUT /api/ai/providers/:providerId/key proxies the body to the agent as a POST', async () => {
+    fetchMock.mockResolvedValue({
+      status: 200,
+      json: async () => ({ ok: true }),
+    })
+
+    const res = await request(app)
+      .put('/api/ai/providers/anthropic/key')
+      .send({ api_key: 'sk-test' })
+
+    expect(res.status).toBe(200)
+    expect(res.body).toEqual({ ok: true })
+    const [url, options] = fetchMock.mock.calls[0]
+    expect(url).toBe('http://localhost:8000/providers/anthropic/key')
+    expect(options.method).toBe('POST')
+    expect(JSON.parse(options.body)).toEqual({ api_key: 'sk-test' })
+  })
+
+  it('PUT /api/ai/providers/:providerId/key returns 503 when the agent is unreachable', async () => {
+    fetchMock.mockRejectedValue(new Error('connection refused'))
+
+    const res = await request(app)
+      .put('/api/ai/providers/anthropic/key')
+      .send({ api_key: 'sk-test' })
+
+    expect(res.status).toBe(503)
+    expect(res.body).toEqual({ error: 'Agent service not running' })
+  })
 })

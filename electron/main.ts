@@ -188,15 +188,10 @@ const AGENT_ENV_VAR_BY_PROVIDER: Record<string, string> = {
 /** Push a freshly-saved key into the already-running agent process without a restart. */
 async function pushProviderKeyToAgent(providerId: string, apiKey: string): Promise<void> {
   try {
-    await fetch(`http://localhost:${AGENT_PORT}/settings`, {
+    await fetch(`http://localhost:${AGENT_PORT}/providers/${providerId}/key`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        active_provider: providerId,
-        auto_fallback_to_ollama: true,
-        providers: {},
-        api_key: apiKey,
-      }),
+      body: JSON.stringify({ api_key: apiKey }),
     })
   } catch (err) {
     console.warn('[Electron] Could not push provider key to agent (it may not be running yet):', err)

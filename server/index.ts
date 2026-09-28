@@ -1266,6 +1266,18 @@ app.get('/api/ai/providers/:providerId/models', async (req, res) => {
   }
 })
 
+app.put('/api/ai/providers/:providerId/key', async (req, res) => {
+  try {
+    const r = await proxyToAgent(`/providers/${req.params.providerId}/key`, {
+      method: 'POST',
+      body: JSON.stringify(req.body),
+    })
+    res.status(r.status).json(await r.json())
+  } catch {
+    res.status(503).json({ error: 'Agent service not running' })
+  }
+})
+
 // ─── HTTP + WebSocket ─────────────────────────────────────────────────────────
 
 const httpServer = createServer(app)
