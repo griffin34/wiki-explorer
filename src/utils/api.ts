@@ -15,6 +15,8 @@ declare global {
       invoke: (channel: string, ...args: unknown[]) => Promise<unknown>
       send: (channel: string, ...args: unknown[]) => void
       openInboxFolder?: (wikiPath: string) => Promise<void>
+      /** Save a provider's API key (encrypted at rest via Electron safeStorage) */
+      saveProviderKey: (providerId: string, apiKey: string) => Promise<void>
     }
   }
 }

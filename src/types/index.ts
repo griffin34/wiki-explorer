@@ -101,6 +101,7 @@ export type WsEvent =
   | { event: 'ai:ingest:done'; data: { wikiId: string; file: string; chunks: number; wikiPage?: string } }
   | { event: 'ai:ingest:error'; data: { wikiId: string; file: string; error: string } }
   | { event: 'ai:wiki:created'; data: { wikiId: string; page: string; title: string } }
+  | { event: 'ai:fallback'; data: { provider: string } }
 
 export const PAGE_TYPE_COLORS: Record<string, string> = {
   overview: '#89b4fa',

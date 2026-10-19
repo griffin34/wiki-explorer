@@ -3,15 +3,17 @@ import { useNavigate, useParams } from 'react-router-dom'
 import { X, Loader2, CheckCircle2, XCircle, FileText, Sparkles } from 'lucide-react'
 import { useWikiSocket } from '../hooks/useWiki'
 import type { WsEvent } from '../types'
+import { PROVIDER_LABELS } from './AISettingsPanel'
 
 interface Toast {
   id: string
-  type: 'processing' | 'done' | 'error' | 'wiki-created'
+  type: 'processing' | 'done' | 'error' | 'wiki-created' | 'fallback'
   wikiId: string
   file?: string
   title?: string
   page?: string
   error?: string
+  provider?: string
   ts: number
 }
 
@@ -66,6 +68,17 @@ export default function AIToast() {
             ts: now,
           },
         ])
+      } else if (e.event === 'ai:fallback') {
+        setToasts((prev) => [
+          ...prev,
+          {
+            id: `fallback-${e.data.provider}-${now}`,
+            type: 'fallback',
+            wikiId: '',
+            provider: e.data.provider,
+            ts: now,
+          },
+        ])
       }
     },
     []
@@ -101,6 +114,8 @@ export default function AIToast() {
               ? 'bg-[var(--success-faint,rgba(166,227,161,0.95))] border-[var(--success,#a6e3a1)]'
               : toast.type === 'wiki-created'
               ? 'bg-[var(--accent-faint,rgba(137,180,250,0.95))] border-[var(--accent)]'
+              : toast.type === 'fallback'
+              ? 'bg-[var(--warning-faint,rgba(249,226,175,0.95))] border-[var(--warning,#f9e2af)]'
               : 'bg-[var(--error-faint,rgba(243,139,168,0.95))] border-[var(--error,#f38ba8)]'
           }`}
         >
@@ -119,6 +134,7 @@ export default function AIToast() {
               {toast.type === 'processing' && 'Processing file...'}
               {toast.type === 'done' && 'File processed'}
               {toast.type === 'wiki-created' && 'Wiki page created!'}
+              {toast.type === 'fallback' && 'Switched to Ollama'}
               {toast.type === 'error' && 'Processing failed'}
             </p>
             <p className="text-xs text-[var(--text-secondary)] truncate">
@@ -137,6 +153,11 @@ export default function AIToast() {
                 </button>
               )}
               {toast.error && <span className="text-[var(--error,#f38ba8)]">{toast.error}</span>}
+              {toast.type === 'fallback' && toast.provider && (
+                <span>
+                  {PROVIDER_LABELS[toast.provider] ?? toast.provider} was unavailable — fell back to Ollama for this request.
+                </span>
+              )}
             </p>
             {toast.type === 'done' && toast.page && currentWikiId === toast.wikiId && (
               <button

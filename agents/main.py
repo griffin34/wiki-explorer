@@ -8,6 +8,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from agents.edit import EditAgent
 from agents.ingestion import IngestionAgent
@@ -15,6 +16,9 @@ from agents.search import SearchAgent
 from agents.wiki import WikiAgent
 from config import settings
 from models.schemas import (
+    AISettings,
+    AISettingsResponse,
+    AISettingsUpdateRequest,
     HealthStatus,
     IngestRequest,
     SearchRequest,
@@ -31,9 +35,14 @@ from models.schemas import (
     EditApplyRequest,
     EditApplyResponse,
     ManualEditRequest,
+    ProviderKeyRequest,
 )
+from services.ai_settings_service import AISettingsService
 from services.changelog_service import ChangelogService
 from services.chroma_service import ChromaService
+from services.llm_providers.base import AuthConfigError, TransientProviderError
+from services.llm_providers.registry import PROVIDER_SPECS, create_provider
+from services.llm_router import LLMRouter
 from services.markitdown_service import MarkItDownService
 from services.ollama_service import OllamaService
 from services import ollama_service as _ollama_module
@@ -52,14 +61,57 @@ ollama_svc = OllamaService()
 chroma_svc = ChromaService()
 markitdown_svc = MarkItDownService()
 changelog_svc = ChangelogService()
+ai_settings_svc = AISettingsService()
+llm_router = LLMRouter(ollama_svc)
 
-ingestion_agent = IngestionAgent(ollama_svc, chroma_svc, markitdown_svc)
-wiki_agent = WikiAgent(ollama_svc, chroma_svc)
-search_agent = SearchAgent(ollama_svc, chroma_svc)
-edit_agent = EditAgent(ollama_svc, chroma_svc, changelog_svc)
+ingestion_agent = IngestionAgent(llm_router, chroma_svc, markitdown_svc)
+wiki_agent = WikiAgent(llm_router, chroma_svc)
+search_agent = SearchAgent(llm_router, chroma_svc)
+edit_agent = EditAgent(llm_router, chroma_svc, changelog_svc)
 
 # Wire wiki_agent into ingestion_agent for auto-generation after ingest
 ingestion_agent.wiki_agent = wiki_agent
+
+# In-memory API keys for this process. Set from env/.env at startup (dev
+# mode) and/or live via POST /settings (Electron, after decrypting its
+# store). Never written back to ai-settings.json — that file holds only
+# non-secret provider/model choice.
+_api_keys: dict[str, str] = {}
+if settings.anthropic_api_key:
+    _api_keys["anthropic"] = settings.anthropic_api_key
+if settings.openai_api_key:
+    _api_keys["openai"] = settings.openai_api_key
+if settings.xai_api_key:
+    _api_keys["xai"] = settings.xai_api_key
+
+
+class _UnconfiguredProvider:
+    """Sentinel for a provider that's marked active in ai-settings.json but
+    has no key available in this process yet (e.g. a fresh dev-mode start
+    without the matching env var). generate() must raise AuthConfigError —
+    the same contract as a revoked key — never silently behave like Ollama,
+    since active_provider_id still correctly reports the real provider."""
+
+    async def generate(self, prompt: str, system: str | None = None) -> str:
+        raise AuthConfigError("No API key configured for this provider in this session")
+
+
+def _apply_ai_settings(ai_settings) -> None:
+    """Configure llm_router from an AISettings object + the current _api_keys."""
+    provider_id = ai_settings.active_provider
+    if provider_id == "ollama":
+        llm_router.configure("ollama", None, ai_settings.auto_fallback_to_ollama)
+        return
+    api_key = _api_keys.get(provider_id)
+    provider_settings = ai_settings.providers.get(provider_id)
+    if not api_key or not provider_settings:
+        llm_router.configure(provider_id, _UnconfiguredProvider(), ai_settings.auto_fallback_to_ollama)
+        return
+    generator = create_provider(provider_id, api_key=api_key, model=provider_settings.model)
+    llm_router.configure(provider_id, generator, ai_settings.auto_fallback_to_ollama)
+
+
+_apply_ai_settings(ai_settings_svc.load())
 
 
 # ---------------------------------------------------------------------------
@@ -90,6 +142,25 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# Provider errors raised by llm_router.generate() (bad/revoked key, provider
+# outage) become actionable HTTP errors instead of generic 500s — which
+# Express would otherwise surface as "Agent service not running".
+@app.exception_handler(AuthConfigError)
+async def auth_config_error_handler(request, exc: AuthConfigError):
+    return JSONResponse(
+        status_code=401,
+        content={"detail": f"AI provider authentication failed: {exc}. Check your API key in AI Provider Settings."},
+    )
+
+
+@app.exception_handler(TransientProviderError)
+async def transient_provider_error_handler(request, exc: TransientProviderError):
+    return JSONResponse(
+        status_code=503,
+        content={"detail": f"AI provider temporarily unavailable: {exc}"},
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -250,7 +321,7 @@ Respond in this exact JSON format only, no other text:
 }}"""
 
     try:
-        response = await ollama_svc.generate(
+        response = await llm_router.generate(
             prompt,
             system="You are a helpful assistant that outputs only valid JSON. No markdown, no explanation, just the JSON object."
         )
@@ -327,7 +398,7 @@ Follow this format exactly, keeping it concise (60-80 lines):
 
 Use markdown formatting. Be practical and specific to this wiki's topics."""
 
-        wiki_md_content = await ollama_svc.generate(
+        wiki_md_content = await llm_router.generate(
             wiki_md_prompt,
             system="You are a technical writer creating a concise operating manual for a personal wiki system."
         )
@@ -473,6 +544,8 @@ async def preview_edit(req: EditPreviewRequest) -> EditPreviewResponse:
     """Preview an AI bulk edit based on a natural language instruction."""
     try:
         return await edit_agent.preview_edit(req.wiki_id, req.instruction)
+    except (AuthConfigError, TransientProviderError):
+        raise  # handled by the global provider-error handlers
     except Exception as exc:
         logger.error("Edit preview failed: %s", exc)
         raise HTTPException(status_code=500, detail=str(exc))
@@ -489,6 +562,8 @@ async def apply_edit(req: EditApplyRequest) -> EditApplyResponse:
         )
     except RuntimeError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
+    except (AuthConfigError, TransientProviderError):
+        raise  # handled by the global provider-error handlers
     except Exception as exc:
         logger.error("Edit apply failed: %s", exc)
         raise HTTPException(status_code=500, detail=str(exc))
@@ -510,6 +585,8 @@ async def manual_edit_page(
         )
     except RuntimeError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
+    except (AuthConfigError, TransientProviderError):
+        raise  # handled by the global provider-error handlers
     except Exception as exc:
         logger.error("Manual edit failed: %s", exc)
         raise HTTPException(status_code=500, detail=str(exc))
@@ -529,6 +606,86 @@ async def get_edit_history(
     except Exception as exc:
         logger.error("Get edit history failed: %s", exc)
         raise HTTPException(status_code=500, detail=str(exc))
+
+
+# ---------------------------------------------------------------------------
+# AI Settings
+# ---------------------------------------------------------------------------
+
+@app.get("/settings", response_model=AISettingsResponse)
+async def get_ai_settings() -> AISettingsResponse:
+    ai_settings = ai_settings_svc.load()
+    return AISettingsResponse(
+        active_provider=ai_settings.active_provider,
+        auto_fallback_to_ollama=ai_settings.auto_fallback_to_ollama,
+        providers=ai_settings.providers,
+        keys_configured={pid: pid in _api_keys for pid in PROVIDER_SPECS if pid != "ollama"},
+    )
+
+
+@app.post("/settings", response_model=AISettingsResponse)
+async def update_ai_settings(req: AISettingsUpdateRequest) -> AISettingsResponse:
+    if req.active_provider not in PROVIDER_SPECS:
+        raise HTTPException(status_code=400, detail=f"Unknown provider: {req.active_provider!r}")
+
+    if req.api_key:
+        _api_keys[req.active_provider] = req.api_key
+
+    existing_settings = ai_settings_svc.load()
+    merged_providers = {**existing_settings.providers, **req.providers}
+
+    new_settings = AISettings(
+        active_provider=req.active_provider,
+        auto_fallback_to_ollama=req.auto_fallback_to_ollama,
+        providers=merged_providers,
+    )
+    ai_settings_svc.save(new_settings)
+    _apply_ai_settings(new_settings)
+
+    return AISettingsResponse(
+        active_provider=new_settings.active_provider,
+        auto_fallback_to_ollama=new_settings.auto_fallback_to_ollama,
+        providers=new_settings.providers,
+        keys_configured={pid: pid in _api_keys for pid in PROVIDER_SPECS if pid != "ollama"},
+    )
+
+
+@app.post("/providers/{provider_id}/key")
+async def set_provider_key(provider_id: str, req: ProviderKeyRequest) -> dict:
+    """Stage an API key in memory so /providers/{id}/models can validate it.
+
+    Deliberately does NOT persist settings, change active_provider, or
+    reconfigure llm_router: a provider may only become active via POST
+    /settings (Save), after its key has passed a list_models() call.
+    """
+    if provider_id not in PROVIDER_SPECS:
+        raise HTTPException(status_code=404, detail=f"Unknown provider: {provider_id!r}")
+    if provider_id == "ollama":
+        raise HTTPException(status_code=400, detail="Ollama does not use an API key")
+    _api_keys[provider_id] = req.api_key
+    return {"ok": True}
+
+
+@app.get("/providers/{provider_id}/models")
+async def list_provider_models(provider_id: str) -> list[str]:
+    if provider_id not in PROVIDER_SPECS:
+        raise HTTPException(status_code=404, detail=f"Unknown provider: {provider_id!r}")
+    if provider_id == "ollama":
+        raise HTTPException(status_code=400, detail="Ollama models are not managed here — see OLLAMA_MODEL")
+
+    api_key = _api_keys.get(provider_id)
+    if not api_key:
+        raise HTTPException(status_code=400, detail=f"No API key set for provider {provider_id!r}")
+
+    # The model field is irrelevant for list_models() — this client is only
+    # used to call it, never to generate().
+    provider = create_provider(provider_id, api_key=api_key, model="")
+    try:
+        return await provider.list_models()
+    except AuthConfigError as exc:
+        raise HTTPException(status_code=401, detail=str(exc))
+    except TransientProviderError as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
 
 
 # ---------------------------------------------------------------------------

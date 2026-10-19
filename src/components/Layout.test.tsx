@@ -127,4 +127,20 @@ describe('Layout', () => {
     // Click fires navigate('/'); Layout unmounts (no matching route), no crash = success
     await userEvent.click(wikisBtn)
   })
+
+  it('opens the AI Settings panel when the gear-icon button is clicked', async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        active_provider: 'ollama',
+        auto_fallback_to_ollama: true,
+        providers: {},
+        keys_configured: {},
+      }),
+    } as Response)
+    renderWithRouter(<Layout />, { route: '/wiki/w1', path: '/wiki/:wikiId' })
+    const settingsBtn = screen.getByTitle('AI Provider Settings')
+    await userEvent.click(settingsBtn)
+    expect(screen.getByText('AI Provider Settings')).toBeInTheDocument()
+  })
 })
